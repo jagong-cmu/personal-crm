@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models import EmbeddingChunk, Person, PersonSource
+from app.services import entity_resolution
 from app.services.embedding import content_hash, embed_documents
 
 
@@ -46,26 +47,16 @@ def _normalize_email(email: str | None) -> str | None:
     return email.strip().lower() if email else None
 
 
-def resolve(db: Session, tenant_id, rec: NormalizedRecord) -> tuple[Person, bool]:
-    """Return (person, created). Slice 0: exact normalized-email match, else new."""
-    email = _normalize_email(rec.primary_email)
-    if email:
-        existing = db.scalar(
-            select(Person).where(Person.tenant_id == tenant_id, Person.primary_email == email)
-        )
-        if existing is not None:
-            return existing, False
+def resolve(db: Session, tenant_id, rec: NormalizedRecord) -> tuple[Person | None, bool]:
+    """Return (person, created), delegating to the T4 entity-resolution engine.
 
-    person = Person(
-        tenant_id=tenant_id,
-        display_name=rec.display_name,
-        primary_email=email,
-        company=rec.company,
-        title=rec.title,
-    )
-    db.add(person)
-    db.flush()  # assign id
-    return person, True
+    Follows the alias-first / exact-email / non-human-drop / provisional / fuzzy order.
+    A dropped (non-human/list) record returns (None, False); the ingest loop skips it.
+    The full ResolutionResult (confidence, needs_review, provisional) is available via
+    ``entity_resolution.resolve`` for callers that need it.
+    """
+    result = entity_resolution.resolve(db, tenant_id, rec)
+    return result.person, result.created
 
 
 def _upsert_source(db: Session, tenant_id, person: Person, rec: NormalizedRecord) -> None:
@@ -134,6 +125,8 @@ def ingest(db: Session, tenant_id, records: list[NormalizedRecord]) -> IngestRes
     pending: list[tuple[Person, NormalizedRecord]] = []
     for rec in records:
         person, created = resolve(db, tenant_id, rec)
+        if person is None:
+            continue  # non-human / list record dropped by resolution (T4)
         result.people_created += int(created)
         result.people_matched += int(not created)
         _upsert_source(db, tenant_id, person, rec)

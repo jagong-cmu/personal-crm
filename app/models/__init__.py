@@ -71,6 +71,27 @@ class PersonSource(Base):
     person: Mapped[Person] = relationship(back_populates="sources")
 
 
+class PersonAlias(Base):
+    """Sticky source-record -> person merges (T3). Resolution checks aliases FIRST so a
+    manual or confident-auto merge persists across re-syncs. Un-merge = delete the row.
+    """
+
+    __tablename__ = "person_aliases"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "source_type", "source_record_id", name="uq_person_alias"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_id: Mapped[str] = mapped_column(Text, nullable=False)
+    person_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("people.id"), nullable=False)
+    decided_by: Mapped[str] = mapped_column(Text, nullable=False)  # 'manual' | 'auto'
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Organization(Base):
     __tablename__ = "organizations"
 
@@ -135,6 +156,7 @@ class OAuthCredential(Base):
 __all__ = [
     "Person",
     "PersonSource",
+    "PersonAlias",
     "Organization",
     "Interaction",
     "EmbeddingChunk",
