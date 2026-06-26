@@ -60,7 +60,16 @@ def resolve(db: Session, tenant_id, rec: NormalizedRecord) -> tuple[Person | Non
     return result.person, result.created
 
 
-def _upsert_source(db: Session, tenant_id, person: Person, rec: NormalizedRecord) -> None:
+def _upsert_source(
+    db: Session,
+    tenant_id,
+    person: Person,
+    rec: NormalizedRecord,
+    matched_confidence: float | None = None,
+) -> None:
+    # matched_confidence: the fuzzy(name+company) score when this binding came from a
+    # fuzzy merge; None for exact-email / alias / provisional binds (T4). Persisted so
+    # the manual-review queue (T14) can rank weak matches.
     stmt = (
         pg_insert(PersonSource)
         .values(
@@ -69,11 +78,15 @@ def _upsert_source(db: Session, tenant_id, person: Person, rec: NormalizedRecord
             source_type=rec.source_type,
             source_record_id=rec.source_record_id,
             raw_data=rec.raw,
-            matched_confidence=None,  # exact/null for Slice 0
+            matched_confidence=matched_confidence,
         )
         .on_conflict_do_update(
             constraint="uq_person_source",
-            set_={"raw_data": rec.raw, "person_id": person.id},
+            set_={
+                "raw_data": rec.raw,
+                "person_id": person.id,
+                "matched_confidence": matched_confidence,
+            },
         )
     )
     db.execute(stmt)
@@ -158,21 +171,23 @@ def ingest(db: Session, tenant_id, records: list[NormalizedRecord]) -> IngestRes
         stage = "resolve"
         try:
             with db.begin_nested():
-                person, created = resolve(db, tenant_id, rec)
-                if person is None:
+                # Call the engine directly (not the resolve() wrapper) so the fuzzy
+                # match confidence reaches _upsert_source for the review queue (T14).
+                res = entity_resolution.resolve(db, tenant_id, rec)
+                if res.person is None:
                     # Non-human / list record intentionally dropped by resolution
                     # (T4). Not a failure — skip it without a dead-letter row.
                     continue
                 stage = "upsert"
-                _upsert_source(db, tenant_id, person, rec)
+                _upsert_source(db, tenant_id, res.person, rec, res.confidence)
         except Exception as exc:  # noqa: BLE001 - isolate any per-record failure
             result.errors += 1
             _record_sync_error(db, tenant_id, rec, stage, exc)
             continue
-        result.people_created += int(created)
-        result.people_matched += int(not created)
+        result.people_created += int(res.created)
+        result.people_matched += int(not res.created)
         result.sources_upserted += 1
-        pending.append((person, rec))
+        pending.append((res.person, rec))
 
     # Embedding: Voyage already retries with backoff; if it still fails, dead-letter
     # the affected records instead of crashing the whole sync.
