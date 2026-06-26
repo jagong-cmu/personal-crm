@@ -132,6 +132,24 @@ class OAuthCredential(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SyncError(Base):
+    """Dead-letter row for a record that failed ingest (T7).
+
+    Privacy: stores ONLY the source record id + a short reason string. NEVER the
+    raw record body, tokens, emails, or any PII payload.
+    """
+
+    __tablename__ = "sync_errors"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)  # contacts|gmail|calendar|...
+    source_record_id: Mapped[str | None] = mapped_column(Text)  # id only, never the body
+    stage: Mapped[str] = mapped_column(Text, nullable=False)  # resolve|upsert|embed
+    reason: Mapped[str] = mapped_column(Text, nullable=False)  # short message, no payload/PII
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 __all__ = [
     "Person",
     "PersonSource",
@@ -139,4 +157,5 @@ __all__ = [
     "Interaction",
     "EmbeddingChunk",
     "OAuthCredential",
+    "SyncError",
 ]

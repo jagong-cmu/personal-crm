@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.models import EmbeddingChunk, Person, PersonSource
+from app.models import EmbeddingChunk, Person, PersonSource, SyncError
 from app.services.embedding import content_hash, embed_documents
 
 
@@ -40,6 +40,7 @@ class IngestResult:
     sources_upserted: int = 0
     chunks_embedded: int = 0
     chunks_skipped: int = 0
+    errors: int = 0  # T7: records routed to the sync_errors dead-letter table
 
 
 def _normalize_email(email: str | None) -> str | None:
@@ -129,19 +130,66 @@ def _embed_pending(db: Session, tenant_id, pending: list[tuple[Person, Normalize
     return len(to_embed), skipped
 
 
+def _short_reason(exc: Exception, limit: int = 300) -> str:
+    """Privacy-safe failure summary: exception type + truncated message ONLY.
+
+    We deliberately derive the reason from the exception, never from the record
+    body/raw/email, so no PII or token payload can leak into sync_errors.
+    """
+    msg = str(exc).replace("\n", " ").strip()
+    if len(msg) > limit:
+        msg = msg[:limit] + "…"
+    return f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+
+
+def _record_sync_error(
+    db: Session, tenant_id, rec: NormalizedRecord, stage: str, exc: Exception
+) -> None:
+    """Write a dead-letter row. Stores ONLY source ids + a short reason — never the body."""
+    db.add(
+        SyncError(
+            tenant_id=tenant_id,
+            source_type=rec.source_type,
+            source_record_id=rec.source_record_id,  # id only
+            stage=stage,
+            reason=_short_reason(exc),
+        )
+    )
+    db.flush()
+
+
 def ingest(db: Session, tenant_id, records: list[NormalizedRecord]) -> IngestResult:
     result = IngestResult()
     pending: list[tuple[Person, NormalizedRecord]] = []
     for rec in records:
-        person, created = resolve(db, tenant_id, rec)
+        # Per-record isolation: a SAVEPOINT lets one bad record roll back without
+        # discarding the records already handled in this sync.
+        stage = "resolve"
+        try:
+            with db.begin_nested():
+                person, created = resolve(db, tenant_id, rec)
+                stage = "upsert"
+                _upsert_source(db, tenant_id, person, rec)
+        except Exception as exc:  # noqa: BLE001 - isolate any per-record failure
+            result.errors += 1
+            _record_sync_error(db, tenant_id, rec, stage, exc)
+            continue
         result.people_created += int(created)
         result.people_matched += int(not created)
-        _upsert_source(db, tenant_id, person, rec)
         result.sources_upserted += 1
         pending.append((person, rec))
 
-    embedded, skipped = _embed_pending(db, tenant_id, pending)
-    result.chunks_embedded = embedded
-    result.chunks_skipped = skipped
+    # Embedding: Voyage already retries with backoff; if it still fails, dead-letter
+    # the affected records instead of crashing the whole sync.
+    try:
+        with db.begin_nested():
+            embedded, skipped = _embed_pending(db, tenant_id, pending)
+        result.chunks_embedded = embedded
+        result.chunks_skipped = skipped
+    except Exception as exc:  # noqa: BLE001 - embed batch failed after backoff
+        for _, rec in pending:
+            result.errors += 1
+            _record_sync_error(db, tenant_id, rec, "embed", exc)
+
     db.commit()
     return result
