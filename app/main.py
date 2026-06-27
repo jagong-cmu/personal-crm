@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from app.api import auth, query, sync
+from app.api import auth, people, query, sync
 from app.config import get_settings
 from app.db.session import engine
 
@@ -46,6 +46,7 @@ app = FastAPI(title="Network Intelligence Platform", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(sync.router)
 app.include_router(query.router)
+app.include_router(people.router)
 
 
 @app.get("/healthz")

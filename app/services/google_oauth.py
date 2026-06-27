@@ -1,7 +1,14 @@
 """Google OAuth: consent URL, code exchange, and credential load/refresh.
 
-Slice 0 scope: contacts.readonly only. Gmail/Calendar scopes are added in later
-slices (Gmail uses gmail.metadata per the privacy decision).
+Scopes (all READ-ONLY):
+  * contacts.readonly  — People API (Contacts connector)
+  * gmail.metadata     — Gmail headers ONLY; never message bodies (privacy decision:
+                         no email body text leaves the machine)
+  * calendar.readonly  — Calendar events (attendees, titles, times)
+
+Adding scopes after first consent: stored credentials hold only the scopes granted
+at the time. Re-run /auth/google/start to re-consent and pick up the new scopes
+(include_granted_scopes makes this incremental).
 
 Tokens are stored Fernet-encrypted in oauth_credentials. In Google "Testing"
 publishing status the refresh token expires after 7 days, so re-running the
@@ -10,6 +17,7 @@ consent flow weekly is expected for v1 (see PLAN.md, NOT-in-scope).
 from __future__ import annotations
 
 import os
+import threading
 
 # Local-dev OAuth relaxations, read by oauthlib at token-exchange time:
 #  - RELAX_TOKEN_SCOPE: Google may return scopes in a different order or include
@@ -31,8 +39,20 @@ from app.config import get_settings
 from app.models import OAuthCredential
 from app.services.crypto import decrypt, encrypt
 
-SCOPES = ["https://www.googleapis.com/auth/contacts.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/contacts.readonly",
+    "https://www.googleapis.com/auth/gmail.metadata",
+    "https://www.googleapis.com/auth/calendar.readonly",
+]
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
+
+# T19: refresh concurrency guard. A polling worker and an API request can both notice
+# the access token is stale and call creds.refresh() at the same moment; the second
+# refresh can invalidate the first's freshly-minted token. This process-local lock
+# serialises refreshes within one process. (Across processes — worker vs. web — a
+# Postgres advisory lock keyed on the credential row would be the next step; noted but
+# out of scope for the single-process dev setup.)
+_refresh_lock = threading.Lock()
 
 
 def _flow() -> Flow:
@@ -110,10 +130,18 @@ def load_credentials(db: Session, tenant_id) -> Credentials:
     )
 
     if not creds.valid:
-        creds.refresh(Request())
-        row.encrypted_access_token = encrypt(creds.token)
-        row.expires_at = (
-            creds.expiry.replace(tzinfo=timezone.utc) if creds.expiry else None
-        )
-        db.commit()
+        with _refresh_lock:  # T19: serialise concurrent refreshes in this process
+            # Re-check under the lock: another thread may have refreshed while we waited,
+            # in which case re-loading the row gives us the fresh token for free.
+            db.refresh(row)
+            stored = decrypt(row.encrypted_access_token) if row.encrypted_access_token else None
+            if stored and stored != creds.token:
+                creds.token = stored
+            if not creds.valid:
+                creds.refresh(Request())
+                row.encrypted_access_token = encrypt(creds.token)
+                row.expires_at = (
+                    creds.expiry.replace(tzinfo=timezone.utc) if creds.expiry else None
+                )
+                db.commit()
     return creds

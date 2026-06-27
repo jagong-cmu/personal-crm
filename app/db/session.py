@@ -25,7 +25,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -38,17 +38,35 @@ class Base(DeclarativeBase):
     pass
 
 
-def set_tenant(session: Session, tenant_id: uuid.UUID) -> None:
-    """Bind the session's current transaction to a tenant for Postgres RLS.
+@event.listens_for(Session, "after_begin")
+def _reapply_tenant(session: Session, transaction, connection) -> None:
+    """Re-issue `SET LOCAL app.current_tenant` at the start of EVERY transaction.
 
-    Issues `SET LOCAL app.current_tenant = '<uuid>'`. Because `SET LOCAL` only
-    lives until the end of the current transaction, callers must run their queries
-    within the same transaction (do not COMMIT/ROLLBACK before querying). The uuid
-    is bound as a parameter (not f-string interpolated) to avoid any SQL injection
-    surface, even though the value is server-controlled today.
+    `SET LOCAL` is transaction-scoped: it is discarded on COMMIT/ROLLBACK. A session
+    that commits more than once (the connectors commit ingest, then interactions, then
+    the cursor) would lose the tenant after the first commit, and the next statement
+    would hit the fail-closed RLS policy and error. Binding the tenant on `after_begin`
+    makes it survive across commits for the life of the session — the tenant is stored
+    once in ``session.info['tenant_id']`` by ``set_tenant`` and re-applied here.
     """
-    # SET LOCAL does not accept a bind parameter for the value directly, so we use
-    # set_config(name, value, is_local=true) which does and is exactly equivalent.
+    tenant_id = session.info.get("tenant_id")
+    if tenant_id is not None:
+        connection.execute(
+            text("SELECT set_config('app.current_tenant', :tenant, true)"),
+            {"tenant": str(tenant_id)},
+        )
+
+
+def set_tenant(session: Session, tenant_id: uuid.UUID) -> None:
+    """Bind a session to a tenant for Postgres RLS, durable across commits.
+
+    Stores the tenant on the session and applies it to the current transaction. The
+    ``after_begin`` listener re-applies it to every subsequent transaction, so callers
+    may commit as many times as they like and stay tenant-scoped. The uuid is bound as
+    a parameter (never f-string interpolated) — no SQL-injection surface.
+    """
+    session.info["tenant_id"] = tenant_id
+    # set_config(name, value, is_local=true) == SET LOCAL, but accepts a bind parameter.
     session.execute(
         text("SELECT set_config('app.current_tenant', :tenant, true)"),
         {"tenant": str(tenant_id)},

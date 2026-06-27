@@ -12,7 +12,7 @@ import uuid
 import pytest
 from sqlalchemy import select, text
 
-from app.db.session import SessionLocal, engine
+from app.db.session import SessionLocal, engine, set_tenant
 from app.models import EmbeddingChunk, Person, PersonSource, SyncError
 from app.services.connectors import base as base_mod
 from app.services.connectors.base import NormalizedRecord, ingest
@@ -61,17 +61,21 @@ def test_one_bad_record_is_isolated(monkeypatch):
         ),
     ]
 
-    # Poison resolve() for exactly the bad record.
-    real_resolve = base_mod.resolve
+    # Poison resolution for exactly the bad record. ingest() calls
+    # entity_resolution.resolve directly (to capture fuzzy confidence), so patch THERE.
+    from app.services import entity_resolution
 
-    def flaky_resolve(db, tid, rec):
+    real_resolve = entity_resolution.resolve
+
+    def flaky_resolve(db, tid, rec, *args, **kwargs):
         if rec.source_record_id == "bad-1":
             raise RuntimeError("simulated resolve failure")
-        return real_resolve(db, tid, rec)
+        return real_resolve(db, tid, rec, *args, **kwargs)
 
-    monkeypatch.setattr(base_mod, "resolve", flaky_resolve)
+    monkeypatch.setattr(entity_resolution, "resolve", flaky_resolve)
 
     db = SessionLocal()
+    set_tenant(db, tenant_id)  # required under enforced RLS (non-superuser role)
     try:
         result = ingest(db, tenant_id, records)
 
