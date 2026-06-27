@@ -13,3 +13,7 @@ venv/
 
 # OS
 .DS_Store
+
+# Tooling (gstack worktrees, sessions, skills)
+.gstack/
+.claude/
