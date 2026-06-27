@@ -13,7 +13,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.session import get_db
+from app.db.session import get_tenant_db
 from app.services import google_oauth
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def start() -> RedirectResponse:
 def callback(
     code: str | None = None,
     error: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_tenant_db),
 ) -> RedirectResponse:
     if error:
         return RedirectResponse(f"/?auth_error={error}", status_code=303)
