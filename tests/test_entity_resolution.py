@@ -154,16 +154,23 @@ _db_required = pytest.mark.skipif(_TEST_DB is None, reason="TEST_DATABASE_URL no
 
 @pytest.fixture()
 def db_session():
+    import uuid
+
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
-    from app.db.session import Base
+    from app.db.session import Base, set_tenant
     import app.models  # noqa: F401  (register tables)
 
     engine = create_engine(_TEST_DB)
     Base.metadata.create_all(engine)
+    tenant = uuid.uuid4()
     with Session(engine) as s:
-        yield s
+        # SET LOCAL app.current_tenant so the suite runs under the non-superuser,
+        # RLS-enforced role (crm_app) — not just a superuser that bypasses RLS.
+        # Every query on an RLS table reads this GUC and fails closed if it is unset.
+        set_tenant(s, tenant)
+        yield s, tenant
         s.rollback()
 
 
@@ -182,11 +189,9 @@ def _rec(**kw):
 
 @_db_required
 def test_resolve_provisional_email_no_company(db_session):
-    import uuid
-
     from app.services.entity_resolution import resolve
 
-    t = uuid.uuid4()
+    db_session, t = db_session
     rec = _rec(display_name="Jane", primary_email="jane@example.com")
     r = resolve(db_session, t, rec)
     assert r.created is True
@@ -196,11 +201,9 @@ def test_resolve_provisional_email_no_company(db_session):
 
 @_db_required
 def test_resolve_exact_email_binds(db_session):
-    import uuid
-
     from app.services.entity_resolution import resolve
 
-    t = uuid.uuid4()
+    db_session, t = db_session
     first = resolve(db_session, t, _rec(source_record_id="a", primary_email="x@y.com"))
     db_session.flush()
     second = resolve(db_session, t, _rec(source_record_id="b", primary_email="X@Y.com"))
@@ -210,11 +213,9 @@ def test_resolve_exact_email_binds(db_session):
 
 @_db_required
 def test_resolve_non_human_dropped(db_session):
-    import uuid
-
     from app.services.entity_resolution import resolve
 
-    t = uuid.uuid4()
+    db_session, t = db_session
     r = resolve(db_session, t, _rec(primary_email="no-reply@example.com"))
     assert r.dropped is True
     assert r.person is None
@@ -222,12 +223,10 @@ def test_resolve_non_human_dropped(db_session):
 
 @_db_required
 def test_resolve_alias_first(db_session):
-    import uuid
-
     from app.models import Person, PersonAlias
     from app.services.entity_resolution import resolve
 
-    t = uuid.uuid4()
+    db_session, t = db_session
     p = Person(tenant_id=t, display_name="Canonical", primary_email="c@x.com")
     db_session.add(p)
     db_session.flush()
