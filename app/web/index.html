@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Network Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Inter:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#F6F2E9; --paper-sun:#FBF8F1; --card:#FCFAF4;
+    --ink:#211E18; --ink-soft:#6A6358; --ink-faint:#756D60;
+    --line:#E6DFCF; --line-soft:#EFEADD;
+    --accent:#3F6B52; --accent-ink:#2C4D3A; --accent-soft:#E7EFE6;
+    --amber:#A86A1F; --amber-soft:#F4E9D4;
+    --red:#9B3D2E; --red-soft:#F3E2DD;
+    --serif:"Newsreader",Georgia,serif;
+    --sans:"Inter",-apple-system,system-ui,sans-serif;
+    --mono:"Spline Sans Mono",ui-monospace,monospace;
+    --rail:288px; --r-sm:8px; --r-md:12px; --r-lg:18px;
+    --shadow:0 1px 0 rgba(33,30,24,.04),0 10px 28px -18px rgba(33,30,24,.32);
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#16140F; --paper-sun:#1C1A14; --card:#211E17;
+      --ink:#F0EADD; --ink-soft:#ABA395; --ink-faint:#867D6E;
+      --line:#322E25; --line-soft:#2A271F;
+      --accent:#6FA382; --accent-ink:#A9CEB7; --accent-soft:#23332A;
+      --amber:#D69A4E; --amber-soft:#2E2415; --red:#D98A77; --red-soft:#2E1B16;
+      --shadow:0 1px 0 rgba(0,0,0,.3),0 12px 32px -18px rgba(0,0,0,.7);
+      color-scheme:dark;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;font-family:var(--sans);background:var(--paper);color:var(--ink);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  ::selection{background:var(--accent-soft);}
+  button{font:inherit;color:inherit;cursor:pointer;}
+  a{color:inherit;text-decoration:none;}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
+  .skip{position:absolute;left:-999px;}
+  .skip:focus{left:12px;top:12px;z-index:100;background:var(--card);border:1px solid var(--line);padding:8px 12px;border-radius:8px;}
+
+  .app{display:grid;grid-template-columns:var(--rail) 1fr;min-height:100vh;min-height:100dvh;}
+
+  .rail{border-right:1px solid var(--line);background:var(--paper-sun);padding:20px 16px;display:flex;flex-direction:column;gap:20px;position:sticky;top:0;height:100vh;height:100dvh;overflow-y:auto;}
+  .brand{display:flex;align-items:center;gap:11px;}
+  .brand svg{width:32px;height:32px;color:var(--accent);flex:none;}
+  .brand b{font-family:var(--serif);font-size:17px;font-weight:500;line-height:1.05;letter-spacing:-.01em;}
+  .brand small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin-top:3px;}
+  .reconnect{display:flex;gap:9px;align-items:flex-start;background:var(--amber-soft);border:1px solid color-mix(in srgb,var(--amber) 30%,transparent);border-radius:var(--r-sm);padding:10px 11px;font-size:12px;color:var(--ink-soft);line-height:1.4;}
+  .reconnect .ic{color:var(--amber);flex:none;}
+  .reconnect b{color:var(--ink);}
+  .reconnect button{margin-top:5px;font-family:var(--mono);font-size:11px;color:var(--amber);background:none;border:none;padding:0;text-decoration:underline;}
+  nav.menu{display:flex;flex-direction:column;gap:2px;}
+  .nav-i{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);background:none;border:none;width:100%;text-align:left;font-size:14.5px;color:var(--ink-soft);transition:background .14s;}
+  .nav-i:hover{background:var(--line-soft);}
+  .nav-i svg{width:18px;height:18px;flex:none;color:var(--ink-faint);}
+  .nav-i[aria-current="page"]{background:var(--accent-soft);color:var(--accent-ink);font-weight:500;}
+  .nav-i[aria-current="page"] svg{color:var(--accent);}
+  .nav-i .badge{margin-left:auto;font-family:var(--mono);font-size:10.5px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:1px 7px;color:var(--ink-soft);}
+  .rail-stat{padding:0 4px;}
+  .rail-stat .num{font-family:var(--serif);font-size:26px;line-height:1;}
+  .rail-stat .u{font-size:12px;color:var(--ink-soft);margin-top:3px;}
+  .rail-foot{margin-top:auto;}
+  .privacy{display:flex;gap:9px;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:11px 12px;font-size:11.5px;line-height:1.45;color:var(--ink-soft);}
+  .privacy svg{color:var(--amber);flex:none;margin-top:1px;}
+  .privacy b{color:var(--ink);}
+
+  .main{display:flex;flex-direction:column;min-width:0;}
+  .topbar{display:flex;align-items:center;gap:14px;justify-content:space-between;padding:15px 30px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:8;background:color-mix(in srgb,var(--paper) 85%,transparent);backdrop-filter:blur(8px);}
+  .topbar h1{margin:0;font-family:var(--serif);font-weight:500;font-size:18px;letter-spacing:-.01em;}
+  .topmeta{display:flex;gap:15px;font-family:var(--mono);font-size:11px;color:var(--ink-faint);}
+  .topmeta b{color:var(--ink-soft);font-weight:500;}
+  .hamb{display:none;width:40px;height:40px;border:1px solid var(--line);background:var(--card);border-radius:var(--r-sm);align-items:center;justify-content:center;}
+  .hamb svg{width:18px;height:18px;}
+  .scroll{padding:34px 30px 90px;flex:1;}
+  .col{max-width:760px;margin:0 auto;}
+  .col-wide{max-width:880px;margin:0 auto;}
+
+  .composer{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:18px 18px 14px;}
+  .composer:focus-within{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));}
+  .ask-input{font-family:var(--serif);font-size:23px;line-height:1.3;color:var(--ink);outline:none;min-height:32px;}
+  .ask-input:empty::before{content:attr(data-ph);color:var(--ink-faint);}
+  .composer-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:13px;border-top:1px solid var(--line-soft);flex-wrap:wrap;}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;}
+  .chip{font-size:12px;color:var(--ink-soft);background:var(--paper-sun);border:1px solid var(--line);border-radius:99px;padding:5px 11px;min-height:30px;transition:all .14s;}
+  .chip:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:var(--accent-soft);}
+  .ask-btn{display:inline-flex;align-items:center;gap:7px;font-size:14px;font-weight:500;color:#FBF8F1;background:var(--accent);border:none;border-radius:99px;padding:12px 22px;min-height:44px;white-space:nowrap;transition:background .14s;}
+  .ask-btn:hover{background:var(--accent-ink);}
+  .ask-btn:disabled{opacity:.5;}
+  .ask-btn svg{width:15px;height:15px;}
+
+  .answer-block{margin-top:36px;}
+  .asked-q{font-family:var(--serif);font-style:italic;font-size:18px;color:var(--ink-soft);line-height:1.4;margin-bottom:18px;}
+  .ameta{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-bottom:13px;flex-wrap:wrap;}
+  .ameta .p{width:7px;height:7px;border-radius:50%;background:var(--accent);}
+  .ameta .p.amber{background:var(--amber);} .ameta .p.red{background:var(--red);}
+  .ameta .intent{text-transform:uppercase;letter-spacing:.08em;color:var(--accent-ink);background:var(--accent-soft);border-radius:5px;padding:1px 6px;}
+  .answer{font-family:var(--serif);font-size:20px;line-height:1.62;letter-spacing:-.003em;color:var(--ink);white-space:pre-wrap;}
+  .answer strong{font-weight:600;}
+
+  .cites-head{display:flex;align-items:center;gap:12px;margin:36px 0 14px;}
+  .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0;}
+  .cites-head .rule{flex:1;height:1px;background:var(--line);}
+  .cites-head .count{font-family:var(--mono);font-size:11px;color:var(--ink-faint);}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:16px 17px;transition:border-color .14s,opacity .3s,transform .3s;}
+  .card + .card{margin-top:12px;}
+  .card:hover{border-color:color-mix(in srgb,var(--accent) 32%,var(--line));}
+  .crow{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;}
+  .cid{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:3px;width:22px;flex:none;}
+  .cname{font-size:15.5px;font-weight:600;letter-spacing:-.01em;}
+  .cname .at{color:var(--ink-soft);font-weight:400;}
+  .cmail{font-family:var(--mono);font-size:12px;color:var(--ink-soft);margin-top:2px;}
+  .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-ink);border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));border-radius:5px;padding:2px 7px;flex:none;}
+  .snip{font-size:14px;color:var(--ink-soft);line-height:1.55;margin-top:11px;padding-top:11px;border-top:1px solid var(--line-soft);}
+  .score{display:flex;align-items:center;gap:9px;margin-top:13px;}
+  .sbar{flex:1;height:4px;border-radius:99px;background:var(--line);overflow:hidden;}
+  .sfill{height:100%;border-radius:99px;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 55%,#fff),var(--accent));}
+  .sval{font-family:var(--mono);font-size:11.5px;color:var(--accent-ink);width:46px;text-align:right;}
+  .lo .sfill{background:linear-gradient(90deg,#D8D0BE,var(--amber));}
+  .lo .sval{color:var(--amber);}
+
+  .state{border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);padding:30px 24px;display:flex;flex-direction:column;align-items:flex-start;}
+  .state.err{border-color:color-mix(in srgb,var(--red) 30%,var(--line));background:var(--red-soft);}
+  .state.ok{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft);}
+  .state h3{font-family:var(--serif);font-weight:500;font-size:19px;margin:0 0 7px;}
+  .state p{margin:0 0 18px;font-size:14px;color:var(--ink-soft);max-width:48ch;line-height:1.55;}
+  .btn{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:500;color:#FBF8F1;background:var(--accent);border:none;border-radius:99px;padding:11px 19px;min-height:44px;transition:background .14s;}
+  .btn:hover{background:var(--accent-ink);}
+  .btn.ghost{background:transparent;color:var(--accent-ink);border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));}
+  .btn.ghost:hover{background:var(--accent-soft);}
+  .btn.danger{background:var(--red);} .btn.danger:hover{filter:brightness(.92);}
+  .btn.sm{min-height:38px;padding:8px 15px;font-size:13px;}
+  .btn:disabled{opacity:.55;pointer-events:none;}
+  .btnrow{display:flex;gap:9px;flex-wrap:wrap;}
+
+  .sk{height:14px;border-radius:6px;background:linear-gradient(90deg,var(--line-soft),var(--line),var(--line-soft));background-size:200% 100%;animation:sh 1.3s linear infinite;margin:11px 0;}
+  @keyframes sh{to{background-position:-200% 0;}}
+
+  .srow{display:flex;align-items:center;gap:13px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:14px 16px;}
+  .srow + .srow{margin-top:10px;}
+  .sdot{width:9px;height:9px;border-radius:50%;background:var(--ink-faint);flex:none;}
+  .srow.on .sdot{background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+  .srow.reconnect .sdot{background:var(--amber);box-shadow:0 0 0 3px var(--amber-soft);}
+  .srow.busy .sdot{background:var(--accent);animation:pulse 1s ease-in-out infinite;}
+  @keyframes pulse{50%{opacity:.35;}}
+  .sbody{flex:1;min-width:0;}
+  .sname{font-size:15px;font-weight:500;}
+  .smeta{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);margin-top:2px;}
+  .srow.off .sname{color:var(--ink-soft);}
+
+  .search{display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:10px 16px;margin-bottom:18px;}
+  .search svg{width:16px;height:16px;color:var(--ink-faint);flex:none;}
+  .search input{flex:1;border:none;background:none;outline:none;font:inherit;color:var(--ink);font-size:15px;}
+  .plist{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .pcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:15px 16px;}
+  .pcard .pn{font-size:15px;font-weight:600;letter-spacing:-.01em;}
+  .pcard .pn .at{color:var(--ink-soft);font-weight:400;}
+  .pcard .pe{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);margin-top:3px;}
+  .pcard .ptags{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+
+  .mvs{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:center;margin-top:6px;}
+  .ident{border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 12px;background:var(--paper-sun);}
+  .ident .cname{font-size:14px;}
+  .vs{font-family:var(--mono);font-size:11px;color:var(--ink-faint);text-align:center;line-height:1.3;}
+  .conf{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--accent-ink);background:var(--accent-soft);border-radius:6px;padding:3px 9px;margin-top:11px;}
+  .conf.warn{color:var(--amber);background:var(--amber-soft);}
+  .gone{opacity:0;transform:translateX(20px);pointer-events:none;height:0;padding:0;margin:0;border:0;overflow:hidden;}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--ink);color:var(--paper);border-radius:99px;padding:10px 16px;display:flex;align-items:center;gap:14px;font-size:13.5px;box-shadow:0 12px 30px -10px rgba(0,0,0,.5);transition:all .25s;z-index:40;pointer-events:none;max-width:90vw;}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1;pointer-events:auto;}
+  .toast.err{background:var(--red);color:#fff;}
+  .toast button{background:none;border:none;color:color-mix(in srgb,var(--accent) 60%,#fff);font-weight:600;font-size:13px;text-decoration:underline;white-space:nowrap;}
+
+  .pagehead{margin-bottom:6px;display:flex;align-items:baseline;justify-content:space-between;gap:12px;}
+  .pagehead h2{font-family:var(--serif);font-weight:500;font-size:22px;margin:0;letter-spacing:-.01em;}
+  .pagehead .sub{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);}
+  .pageintro{font-size:14px;color:var(--ink-soft);margin:0 0 20px;max-width:58ch;line-height:1.55;}
+  .scrim{display:none;}
+
+  @media (max-width:980px){ .scroll{padding:28px 22px 80px;} .plist{grid-template-columns:1fr;} }
+  @media (max-width:860px){
+    .app{grid-template-columns:1fr;}
+    .hamb{display:inline-flex;}
+    .topmeta{display:none;}
+    .rail{position:fixed;top:0;left:0;width:300px;max-width:86vw;z-index:30;transform:translateX(-103%);transition:transform .26s cubic-bezier(.4,0,.2,1);box-shadow:0 0 50px -10px rgba(0,0,0,.4);}
+    body.drawer .rail{transform:translateX(0);}
+    body.drawer .scrim{display:block;position:fixed;inset:0;background:rgba(20,16,10,.4);z-index:20;}
+  }
+  @media (max-width:560px){
+    .topbar{padding:13px 18px;} .scroll{padding:22px 16px 70px;}
+    .ask-input{font-size:21px;} .answer{font-size:19px;}
+    .composer-row{flex-direction:column;align-items:stretch;}
+    .composer-row .ask-btn{justify-content:center;}
+    .mvs{grid-template-columns:1fr;} .vs{display:none;}
+    .pagehead{flex-direction:column;gap:2px;}
+  }
+  @media (prefers-reduced-motion:reduce){ *{transition:none!important;animation:none!important;} }
+</style>
+</head>
+<body>
+<a href="#main" class="skip">Skip to content</a>
+<div class="app">
+  <aside class="rail" id="rail" aria-label="Primary">
+    <div class="brand">
+      <svg viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="17" cy="9" r="3.4" fill="currentColor" stroke="none"/><circle cx="7" cy="24" r="3.4"/><circle cx="27" cy="24" r="3.4"/><circle cx="17" cy="20" r="2.4" fill="currentColor" stroke="none"/><path d="M17 12.4 17 17.8 M15 18.6 9 22.2 M19 18.6 25 22.2 M9.6 24 24.4 24" stroke-linecap="round"/></svg>
+      <b>Network<br/>Intelligence<small>personal graph</small></b>
+    </div>
+    <div id="reconnect-slot"></div>
+    <nav class="menu" id="menu" aria-label="Sections"></nav>
+    <div class="rail-stat">
+      <div class="num" id="stat-num">—</div>
+      <div class="u" id="stat-u">loading…</div>
+    </div>
+    <div class="rail-foot">
+      <div class="privacy">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <div><b>Encrypted at rest.</b> No email body leaves this machine. <b>Testing mode</b> — weekly reconnect.</div>
+      </div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim" aria-hidden="true"></div>
+  <main class="main">
+    <header class="topbar">
+      <button class="hamb" id="hamb" aria-label="Open menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18" stroke-linecap="round"/></svg></button>
+      <h1 id="page-title">Ask your network</h1>
+      <div class="topmeta">
+        <span>model <b id="m-model">Opus 4.8</b></span><span>top-k <b>8</b></span><span>tenant <b>jagong</b></span>
+      </div>
+    </header>
+    <div class="scroll" id="main" tabindex="-1"><div id="view"></div></div>
+  </main>
+</div>
+<input type="file" id="filein" accept=".csv" style="display:none" />
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+import { prepare, layout } from '/static/pretext.js';
+
+/* ───────── API ───────── */
+async function api(path, opts){
+  const res = await fetch(path, opts);
+  const ct = res.headers.get('content-type')||'';
+  const body = ct.includes('json') ? await res.json() : await res.text();
+  if(!res.ok){ const msg = (body && body.detail) ? body.detail : (typeof body==='string'?body:res.statusText); throw new Error(msg||('HTTP '+res.status)); }
+  return body;
+}
+const post = (path, json) => api(path, {method:'POST', headers: json?{'Content-Type':'application/json'}:{}, body: json?JSON.stringify(json):undefined});
+
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = n => (n||0).toLocaleString('en-US');
+
+/* ───────── STATE ───────── */
+const APP = { stats:{people:0,chunks:0}, sources:[], google_connected:false, needs_reconnect:false, reviewCount:0 };
+
+async function loadMeta(){
+  const [stats, src] = await Promise.all([api('/stats'), api('/sources')]);
+  APP.stats = stats; APP.sources = src.sources;
+  APP.google_connected = src.google_connected; APP.needs_reconnect = src.needs_reconnect;
+}
+async function loadReviewCount(){
+  try{ const r = await api('/people/candidates'); APP.reviewCount = r.candidates.length; }catch(_){ APP.reviewCount = 0; }
+}
+
+/* ───────── NAV ───────── */
+const ICONS={
+  ask:'<path d="M21 12a9 9 0 1 1-3.5-7.1" stroke-linecap="round"/><path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>',
+  people:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0" stroke-linecap="round"/><path d="M16 6.2a3.2 3.2 0 0 1 0 6M17 14.5a5.5 5.5 0 0 1 3.5 4.5" stroke-linecap="round"/>',
+  review:'<path d="M4 7h11M4 12h11M4 17h7" stroke-linecap="round"/><path d="M17.5 15.5l2 2 3-3.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  sources:'<rect x="3.5" y="4" width="17" height="6" rx="2"/><rect x="3.5" y="14" width="17" height="6" rx="2"/>',
+};
+const ROUTES=[
+  {id:'ask',label:'Ask',title:'Ask your network'},
+  {id:'people',label:'People',title:'People'},
+  {id:'review',label:'Review',title:'Review queue'},
+  {id:'sources',label:'Sources',title:'Sources'},
+];
+function renderNav(active){
+  document.getElementById('menu').innerHTML = ROUTES.map(r=>{
+    const badge = r.id==='review' && APP.reviewCount>0 ? `<span class="badge">${APP.reviewCount}</span>` : '';
+    return `<button class="nav-i" data-go="${r.id}" ${active===r.id?'aria-current="page"':''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">${ICONS[r.id]}</svg>${r.label}${badge}</button>`;
+  }).join('');
+}
+function renderRail(){
+  document.getElementById('reconnect-slot').innerHTML = APP.needs_reconnect
+    ? `<div class="reconnect"><span class="ic">⟳</span><div><b>Google access expired.</b> Reconnect to keep syncing.<br/><button data-reconnect>Reconnect</button></div></div>` : '';
+  document.getElementById('stat-num').textContent = fmt(APP.stats.people);
+  document.getElementById('stat-u').textContent = APP.stats.people
+    ? `people indexed · ${fmt(APP.stats.chunks)} chunks` : 'nothing indexed yet';
+}
+
+/* ───────── PRETEXT ───────── */
+const prepared=new Map();
+const fontOf=el=>{const c=getComputedStyle(el);return `${c.fontStyle} ${c.fontWeight} ${c.fontSize}/${c.lineHeight} ${c.fontFamily}`;};
+const lhOf=el=>{const lh=parseFloat(getComputedStyle(el).lineHeight);return Number.isFinite(lh)?lh:parseFloat(getComputedStyle(el).fontSize)*1.5;};
+function pretextize(scope){ scope.querySelectorAll('[data-pretext]').forEach(el=>prepared.set(el, prepare(el.textContent, fontOf(el)))); relayout(); }
+function relayout(){ for(const [el,h] of prepared){ if(!document.body.contains(el)){prepared.delete(el);continue;} const {height}=layout(h, el.clientWidth, lhOf(el)); el.style.minHeight=`${Math.ceil(height)}px`; } }
+
+/* ───────── TOAST ───────── */
+let toastT;
+function toast(msg, undo, isErr){
+  const t=document.getElementById('toast');
+  t.className = 'toast show' + (isErr?' err':'');
+  t.innerHTML = `<span>${esc(msg)}</span>` + (undo?`<button data-undo>Undo</button>`:'');
+  if(undo) t.querySelector('[data-undo]').onclick=()=>{ undo(); t.classList.remove('show'); };
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'), isErr?6000:4200);
+}
+
+/* ───────── VIEWS ───────── */
+const view=document.getElementById('view');
+
+function viewAsk(){
+  if(APP.stats.people===0){
+    view.innerHTML = `<div class="col">
+      <section class="composer"><div class="ask-input" data-ph="Ask anything about the people you know…"></div>
+      <div class="composer-row"><div class="chips"></div><button class="ask-btn" disabled>Ask →</button></div></section>
+      <div class="answer-block"><div class="state"><div class="ameta"><span class="p"></span> 0 people indexed</div>
+      <h3>Your network is empty</h3><p>Connect a source and run a sync — then ask away. A question needs someone to answer about.</p>
+      <button class="btn" data-go="sources">Connect a source →</button></div></div></div>`;
+    return;
+  }
+  view.innerHTML = `<div class="col">
+    <section class="composer">
+      <div class="ask-input" contenteditable="true" role="textbox" aria-label="Ask a question" data-ph="Ask anything about the people you know…">Who do I know in climate or energy, and how warm is the connection?</div>
+      <div class="composer-row">
+        <div class="chips">
+          <button class="chip" data-chip="Who do I know in fintech?">Intros into fintech</button>
+          <button class="chip" data-chip="Who works at Stripe?">Who works at Stripe?</button>
+          <button class="chip" data-chip="Who did I most recently email?">Most recent contact</button>
+        </div>
+        <button class="ask-btn" data-ask>Ask <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </section>
+    <div class="answer-block" id="answer-block"></div>
+  </div>`;
+}
+function askLoading(q){
+  document.getElementById('answer-block').innerHTML = `
+    <div class="asked-q">“${esc(q)}”</div>
+    <div class="ameta"><span class="p"></span> searching ${fmt(APP.stats.people)} people · synthesizing…</div>
+    <div class="sk" style="width:97%"></div><div class="sk" style="width:90%"></div><div class="sk" style="width:78%"></div>
+    <div class="card" style="opacity:.55;margin-top:20px"><div class="sk" style="width:42%;margin:2px 0 9px"></div><div class="sk" style="width:68%"></div></div>`;
+}
+async function doAsk(q){
+  q = (q||'').trim(); if(!q) return;
+  askLoading(q);
+  let data;
+  try{ data = await post('/query', {question:q}); }
+  catch(e){
+    document.getElementById('answer-block').innerHTML = `<div class="asked-q">“${esc(q)}”</div>
+      <div class="state err"><div class="ameta"><span class="p red"></span> request failed</div>
+      <h3>That one didn't go through</h3><p>${esc(e.message)}</p>
+      <div class="btnrow"><button class="btn danger" data-ask>Try again</button></div></div>`;
+    return;
+  }
+  const cites = data.citations||[];
+  const low = cites.length>0 && cites.every(c=>(c.score||0) < 0.5);
+  const block=document.getElementById('answer-block');
+  const citeHtml = cites.map((c,i)=>{
+    const pct=Math.max(2,Math.round((c.score||0)*100));
+    return `<article class="card ${ (c.score||0)<0.5 ? 'lo':''}">
+      <div class="crow"><span class="cid">${String(i+1).padStart(2,'0')}</span>
+        <div style="flex:1;min-width:0"><div class="cname">${esc(c.person||'Unknown')}${c.company?` <span class="at">at ${esc(c.company)}</span>`:''}</div>
+        ${c.email?`<div class="cmail">${esc(c.email)}</div>`:''}</div>
+        <span class="tag">${esc(c.source_type||'')}</span></div>
+      ${c.snippet?`<p class="snip" data-pretext>${esc(c.snippet)}</p>`:''}
+      <div class="score"><span class="lbl" style="margin:0">match</span><div class="sbar"><div class="sfill" style="width:${pct}%"></div></div><span class="sval">${(c.score||0).toFixed(4)}</span></div>
+    </article>`;
+  }).join('');
+  block.innerHTML = `<div class="asked-q">“${esc(q)}”</div>
+    <div class="ameta"><span class="p ${low?'amber':''}"></span> ${cites.length?`synthesized from ${cites.length} citation${cites.length>1?'s':''}`:'no citations'}${data.intent?` <span class="intent">${esc(data.intent)}</span>`:''}</div>
+    <p class="answer" data-pretext>${esc(data.answer||'')}</p>
+    ${cites.length?`<div class="cites-head"><p class="lbl">Citations</p><span class="rule"></span><span class="count">${cites.length} retrieved</span></div>${citeHtml}`:''}`;
+  pretextize(block);
+}
+
+async function viewPeople(){
+  view.innerHTML = `<div class="col-wide"><div class="pagehead"><h2>People</h2><span class="sub" id="p-sub">loading…</span></div>
+    <p class="pageintro">Everyone resolved from your connected sources. Search by name or company.</p>
+    <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4" stroke-linecap="round"/></svg>
+      <input id="psearch" placeholder="Search people…" aria-label="Search people"/></label>
+    <div class="plist" id="plist"></div></div>`;
+  let people=[];
+  try{ people=(await api('/people?limit=200')).people; }
+  catch(e){ document.getElementById('plist').innerHTML=`<div class="state err"><h3>Couldn't load people</h3><p>${esc(e.message)}</p></div>`; return; }
+  document.getElementById('p-sub').textContent = `${people.length} of ${fmt(APP.stats.people)}`;
+  const list=document.getElementById('plist');
+  const draw=(qq='')=>{
+    const f=people.filter(p=>((p.display_name||'')+' '+(p.company||'')).toLowerCase().includes(qq.toLowerCase()));
+    list.innerHTML = f.length? f.map(p=>`<div class="pcard"><div class="pn">${esc(p.display_name||'Unknown')}${p.company?` <span class="at">at ${esc(p.company)}</span>`:''}</div>
+      ${p.primary_email?`<div class="pe">${esc(p.primary_email)}</div>`:''}${p.title?`<div class="ptags"><span class="tag">${esc(p.title)}</span></div>`:''}</div>`).join('')
+      : `<div class="state"><h3>No matches</h3><p>Nobody matches “${esc(qq)}”.</p></div>`;
+  };
+  if(people.length===0){ list.innerHTML=`<div class="state"><div class="ameta"><span class="p"></span> empty</div><h3>No people yet</h3><p>Connect a source and run a sync to populate your network.</p><button class="btn" data-go="sources">Go to sources →</button></div>`; return; }
+  draw();
+  document.getElementById('psearch').addEventListener('input',e=>draw(e.target.value));
+}
+
+async function viewReview(){
+  view.innerHTML = `<div class="col-wide"><div class="pagehead"><h2>Review queue</h2><span class="sub" id="rq-sub">loading…</span></div>
+    <p class="pageintro">Records that look like the same person but weren't confident enough to merge automatically. Merge, or keep them separate.</p>
+    <div id="mlist"></div></div>`;
+  let cands=[];
+  try{ cands=(await api('/people/candidates')).candidates; }
+  catch(e){ document.getElementById('mlist').innerHTML=`<div class="state err"><h3>Couldn't load candidates</h3><p>${esc(e.message)}</p></div>`; return; }
+  APP.reviewCount = cands.length; renderNav('review');
+  document.getElementById('rq-sub').textContent = cands.length? `${cands.length} to resolve` : 'all caught up';
+  const list=document.getElementById('mlist');
+  if(cands.length===0){ list.innerHTML=`<div class="state ok"><div class="ameta"><span class="p"></span> queue empty</div><h3>All caught up</h3><p>No ambiguous identities waiting. New low-confidence matches will land here as you sync more sources.</p><button class="btn ghost" data-go="ask">Back to asking →</button></div>`; return; }
+  list.innerHTML = cands.map((m,i)=>{
+    const ident=p=>`<div class="ident"><div class="cname">${esc(p.display_name||'Unknown')}${p.company?` <span class="at">· ${esc(p.company)}</span>`:''}</div><div class="cmail">${esc(p.primary_email||'—')}${p.sources&&p.sources.length?` · ${esc(p.sources.join(', '))}`:''}</div></div>`;
+    const warn = m.reason!=='shared email' && m.score<0.85;
+    return `<article class="card" id="cand-${i}">
+      <div class="mvs">${ident(m.a)}<div class="vs">likely<br/>same?</div>${ident(m.b)}</div>
+      <span class="conf ${warn?'warn':''}">${esc(m.reason)} · ${m.score.toFixed(2)}</span>
+      <div class="btnrow" style="margin-top:13px"><button class="btn sm" data-merge="${i}">Merge</button><button class="btn ghost sm" data-keep="${i}">Keep separate</button></div>
+    </article>`;
+  }).join('');
+  view._cands = cands;
+}
+async function doMerge(i){
+  const m = view._cands[i]; if(!m) return;
+  const el=document.getElementById('cand-'+i);
+  try{ await post('/people/merge', {winner_id:m.winner_id, loser_id:m.loser_id}); }
+  catch(e){ toast('Merge failed: '+e.message, null, true); return; }
+  if(el) el.classList.add('gone');
+  APP.reviewCount=Math.max(0,APP.reviewCount-1); renderNav('review');
+  await loadMeta(); renderRail();
+  const sub=document.getElementById('rq-sub'); if(sub) sub.textContent = APP.reviewCount? `${APP.reviewCount} to resolve`:'all caught up';
+  toast(`Merged ${m.a.display_name||'record'} + ${m.b.display_name||'record'}`, async ()=>{
+    try{ await post('/people/unmerge', {loser_id:m.loser_id}); toast('Merge undone'); await loadMeta(); await loadReviewCount(); route(); }
+    catch(e){ toast('Undo failed: '+e.message, null, true); }
+  });
+}
+function doKeep(i){
+  const el=document.getElementById('cand-'+i); if(el) el.classList.add('gone');
+  APP.reviewCount=Math.max(0,APP.reviewCount-1); renderNav('review');
+  const sub=document.getElementById('rq-sub'); if(sub) sub.textContent = APP.reviewCount? `${APP.reviewCount} to resolve`:'all caught up';
+  toast('Kept separate for this session');
+}
+
+function viewSources(){
+  view.innerHTML = `<div class="col"><div class="pagehead"><h2>Sources</h2><span class="sub">${APP.sources.filter(s=>s.status!=='off').length} connected</span></div>
+    <p class="pageintro">Connect the places your network already lives. Each source owns its own sync. Nothing is shared off this machine.</p>
+    <div id="srows"></div></div>`;
+  drawSources();
+}
+function drawSources(){
+  const wrap=document.getElementById('srows'); if(!wrap) return;
+  wrap.innerHTML = APP.sources.map(s=>{
+    const cls = s.status==='on'?'on':(s.status==='reconnect'?'reconnect':'off');
+    let action='';
+    if(s.action==='re-sync') action=`<button class="btn ghost sm" data-sync="${s.id}">re-sync</button>`;
+    else if(s.action==='reconnect') action=`<button class="btn ghost sm" data-reconnect>reconnect</button>`;
+    else if(s.action==='import') action=`<button class="btn ghost sm" data-import="${s.id}">Import</button>`;
+    else action=`<button class="btn ghost sm" data-connect>Connect</button>`;
+    return `<div class="srow ${cls}" id="srow-${s.id}"><span class="sdot"></span>
+      <div class="sbody"><div class="sname">${esc(s.name)}</div><div class="smeta">${esc(s.meta)}</div></div>${action}</div>`;
+  }).join('');
+}
+async function doSync(id){
+  const row=document.getElementById('srow-'+id);
+  if(row){ row.className='srow busy'; row.querySelector('.smeta').textContent='syncing…'; }
+  try{
+    const r = await post('/sync/'+id);
+    const res=r.result||{};
+    await loadMeta(); renderRail(); drawSources();
+    const made = (res.people_created||0)+(res.people_matched||0);
+    toast(`${id} synced · ${fmt(res.chunks_embedded||0)} chunks${res.errors?` · ${res.errors} errors`:''}`);
+  }catch(e){
+    await loadMeta(); drawSources();
+    toast('Sync failed: '+e.message, null, true);
+  }
+}
+let _importId=null;
+function doImport(id){ _importId=id; document.getElementById('filein').click(); }
+document.getElementById('filein').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return; e.target.value='';
+  const fd=new FormData(); fd.append('file', f);
+  toast('Importing '+f.name+'…');
+  try{ const r=await api('/sync/linkedin',{method:'POST',body:fd}); const res=r.result||{};
+    await loadMeta(); renderRail(); if(location.hash.includes('sources')) drawSources();
+    toast(`LinkedIn imported · ${fmt(res.chunks_embedded||0)} chunks`);
+  }catch(err){ toast('Import failed: '+err.message, null, true); }
+});
+
+/* ───────── ROUTER ───────── */
+function route(){
+  let id=(location.hash.replace('#/','')||'ask'); if(!ROUTES.find(r=>r.id===id)) id='ask';
+  document.getElementById('page-title').textContent = ROUTES.find(r=>r.id===id).title;
+  renderNav(id); renderRail();
+  ({ask:viewAsk, people:viewPeople, review:viewReview, sources:viewSources}[id])();
+  document.getElementById('main').scrollTop=0; closeDrawer();
+}
+const go = id => { location.hash='#/'+id; };
+
+/* ───────── DRAWER ───────── */
+const hamb=document.getElementById('hamb');
+function openDrawer(){ document.body.classList.add('drawer'); hamb.setAttribute('aria-expanded','true'); }
+function closeDrawer(){ document.body.classList.remove('drawer'); hamb.setAttribute('aria-expanded','false'); }
+hamb.onclick=()=>document.body.classList.contains('drawer')?closeDrawer():openDrawer();
+document.getElementById('scrim').onclick=closeDrawer;
+
+/* ───────── EVENTS ───────── */
+document.addEventListener('click', e=>{
+  const t=e.target.closest('[data-go],[data-ask],[data-chip],[data-merge],[data-keep],[data-connect],[data-reconnect],[data-sync],[data-import]');
+  if(!t) return;
+  if(t.dataset.go!==undefined) return go(t.dataset.go);
+  if(t.dataset.connect!==undefined || t.dataset.reconnect!==undefined){ window.location='/auth/google/start'; return; }
+  if(t.dataset.ask!==undefined){ const inp=document.querySelector('.ask-input'); return doAsk(inp?inp.textContent:''); }
+  if(t.dataset.chip!==undefined){ const inp=document.querySelector('.ask-input'); if(inp) inp.textContent=t.dataset.chip; return doAsk(t.dataset.chip); }
+  if(t.dataset.merge!==undefined) return doMerge(+t.dataset.merge);
+  if(t.dataset.keep!==undefined) return doKeep(+t.dataset.keep);
+  if(t.dataset.sync!==undefined) return doSync(t.dataset.sync);
+  if(t.dataset.import!==undefined) return doImport(t.dataset.import);
+});
+document.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && e.target.classList && e.target.classList.contains('ask-input')){ e.preventDefault(); doAsk(e.target.textContent); }
+  if(e.key==='Escape') closeDrawer();
+});
+window.addEventListener('hashchange', route);
+window.addEventListener('resize', relayout);
+
+/* ───────── BOOT ───────── */
+(async()=>{
+  if(document.fonts?.ready){try{await document.fonts.ready;}catch(_){}}
+  const params=new URLSearchParams(location.search);
+  try{ await loadMeta(); await loadReviewCount(); }
+  catch(e){ document.getElementById('view').innerHTML=`<div class="col"><div class="state err"><h3>Can't reach the backend</h3><p>${esc(e.message)}</p><p style="margin:0">Make sure the API is running, then refresh.</p></div></div>`; renderRail(); return; }
+  route();
+  if(params.get('connected')) { toast('Google connected — run a sync to index your contacts'); history.replaceState({},'','/'); }
+  if(params.get('auth_error')) { toast('Google sign-in failed: '+params.get('auth_error'), null, true); history.replaceState({},'','/'); }
+})();
+</script>
+</body>
+</html>

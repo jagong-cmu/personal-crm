@@ -9,13 +9,18 @@ Startup assertions, both fail fast at boot:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api import auth, people, query, sync
+from app.api import auth, people, query, sources, sync
 from app.config import get_settings
 from app.db.session import engine
+
+_WEB_DIR = Path(__file__).parent / "web"
 
 
 def _assert_embedding_dim() -> None:
@@ -72,8 +77,20 @@ app.include_router(auth.router)
 app.include_router(sync.router)
 app.include_router(query.router)
 app.include_router(people.router)
+app.include_router(sources.router)
 
 
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    """Serve the single-page web app."""
+    return FileResponse(_WEB_DIR / "index.html")
+
+
+# Static assets (the Pretext layout bundle, etc.). Mounted after the API routers
+# and the explicit "/" route, so it only serves /static/* and never shadows the API.
+app.mount("/static", StaticFiles(directory=_WEB_DIR), name="static")

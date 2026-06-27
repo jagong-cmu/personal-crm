@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -26,14 +26,14 @@ def start() -> RedirectResponse:
     return RedirectResponse(url)
 
 
-@router.get("/callback", response_class=HTMLResponse)
+@router.get("/callback")
 def callback(
     code: str | None = None,
     error: str | None = None,
     db: Session = Depends(get_db),
-) -> HTMLResponse:
+) -> RedirectResponse:
     if error:
-        raise HTTPException(status_code=400, detail=f"Google returned: {error}")
+        return RedirectResponse(f"/?auth_error={error}", status_code=303)
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
@@ -45,7 +45,5 @@ def callback(
         raise HTTPException(
             status_code=500, detail=f"{type(exc).__name__}: {exc}"
         ) from exc
-    return HTMLResponse(
-        "<h3>Google connected ✅</h3>"
-        "<p>Now run: <code>curl -X POST localhost:8000/sync/contacts</code></p>"
-    )
+    # Land back in the web app; it shows a toast and prompts the first sync.
+    return RedirectResponse("/?connected=1", status_code=303)
