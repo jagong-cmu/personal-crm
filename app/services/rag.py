@@ -286,12 +286,31 @@ def query(db: Session, tenant_id, question: str) -> QueryResult:
         for i, c in enumerate(citations, start=1)
     ]
     context = "\n".join(context_lines)
-    msg = _anthropic().messages.create(
-        model=get_settings().anthropic_model,
-        max_tokens=2048,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}],
-    )
+    try:
+        msg = _anthropic().messages.create(
+            model=get_settings().anthropic_model,
+            max_tokens=2048,
+            system=_SYSTEM,
+            messages=[{"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}],
+        )
+    except anthropic.APIError as exc:
+        # Synthesis is unavailable (e.g. billing / rate limit / outage), but retrieval
+        # succeeded — return the matched people with a clear note instead of a 500, so
+        # the user still gets value from the search.
+        body = getattr(exc, "body", None)
+        note = None
+        if isinstance(body, dict):
+            err = body.get("error")
+            note = err.get("message") if isinstance(err, dict) else None
+        note = note or str(exc)
+        return QueryResult(
+            answer=(
+                "I found matching people below, but couldn't generate a written answer "
+                f"right now ({note}). The retrieval worked — these are your closest matches."
+            ),
+            citations=citations,
+            intent=intent,
+        )
     if msg.stop_reason == "refusal":
         return QueryResult(
             answer="I wasn't able to answer that. Try rephrasing the question.",
