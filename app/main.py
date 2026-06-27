@@ -1,8 +1,10 @@
 """FastAPI entrypoint.
 
-Startup assertion (decision A3): the configured VOYAGE_DIM must equal the actual
-embedding column dimension in Postgres. A mismatch fails fast at boot instead of
-silently erroring on insert.
+Startup assertions, both fail fast at boot:
+  * (A3) the configured VOYAGE_DIM must equal the actual embedding column dimension.
+  * (A1) the runtime DB role must NOT bypass Row-Level Security. A superuser (or any
+    BYPASSRLS role) makes every tenant-isolation policy a silent no-op, so we refuse to
+    start as one rather than leak across tenants.
 """
 from __future__ import annotations
 
@@ -36,8 +38,31 @@ def _assert_embedding_dim() -> None:
         )
 
 
+def _assert_rls_enforced() -> None:
+    """Refuse to start if the runtime role bypasses RLS (superuser or BYPASSRLS).
+
+    Postgres `FORCE ROW LEVEL SECURITY` still does not constrain a superuser or a
+    BYPASSRLS role, so connecting as one turns tenant isolation into a no-op. Connect
+    as the non-superuser `crm_app` role instead (auto-created by docker-compose; see
+    scripts/setup_app_role.sql / README).
+    """
+    with engine.connect() as conn:
+        bypasses = conn.execute(
+            text(
+                "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
+            )
+        ).scalar()
+    if bypasses:
+        raise RuntimeError(
+            "Runtime DB role bypasses Row-Level Security — tenant isolation would be a "
+            "no-op. Point DATABASE_URL at the non-superuser 'crm_app' role (run "
+            "migrations via ADMIN_DATABASE_URL). See README step 5."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _assert_rls_enforced()
     _assert_embedding_dim()
     yield
 

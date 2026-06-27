@@ -11,7 +11,9 @@ from app.db.session import Base
 import app.models  # noqa: F401  (register tables on Base.metadata)
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Migrations run as the admin/owner role (DDL + RLS policy creation); the app itself
+# connects as the non-superuser runtime role. See Settings.migration_url.
+config.set_main_option("sqlalchemy.url", get_settings().migration_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

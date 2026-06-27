@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str
+    # Migrations need DDL + role privileges, so they run as the superuser/owner while the
+    # app runs as the non-superuser 'crm_app' role (RLS enforcement). Falls back to
+    # database_url when unset (e.g. CI, where one role both migrates and queries).
+    admin_database_url: str = ""
 
     anthropic_api_key: str
     voyage_api_key: str
@@ -35,6 +39,11 @@ class Settings(BaseSettings):
     voyage_dim: int = 1024
     anthropic_model: str = "claude-opus-4-8"
     rag_top_k: int = Field(default=8, ge=1, le=50)
+
+    @property
+    def migration_url(self) -> str:
+        """DB URL for migrations/DDL — the admin role when set, else the runtime URL."""
+        return self.admin_database_url or self.database_url
 
     @property
     def tenant_uuid(self) -> uuid.UUID:

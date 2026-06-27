@@ -13,7 +13,12 @@
 -- Point DATABASE_URL at this role:
 --   DATABASE_URL=postgresql+psycopg://crm_app:crm_app@localhost:5432/crm
 --
--- Run after `alembic upgrade head` (so the tables exist), as the 'crm' superuser:
+-- This runs automatically on first `docker compose up` (mounted into
+-- /docker-entrypoint-initdb.d/), BEFORE migrations exist. The role + ALTER DEFAULT
+-- PRIVILEGES below are what matter at init time: every table the 'crm' owner later
+-- creates via migrations inherits the crm_app grants automatically. The GRANT-ON-ALL
+-- statements are a no-op at init (no tables yet) but make the script also correct to
+-- re-run by hand against an already-migrated DB:
 --   docker exec -i personal-crm-db-1 psql -U crm -d crm -f - < scripts/setup_app_role.sql
 -- Idempotent: safe to re-run.
 

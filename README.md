@@ -72,21 +72,21 @@ The Fernet key lives in `secrets/token.key` (gitignored), separate from `DATABAS
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-docker compose up -d            # Postgres+pgvector on :5432
-alembic upgrade head            # create the schema
+docker compose up -d            # Postgres+pgvector on :5432 (also auto-creates the crm_app role)
+alembic upgrade head            # create the schema (runs as ADMIN_DATABASE_URL = crm owner)
 ```
 
-### 5b. Create the non-superuser app role (REQUIRED — makes RLS real)
-The `docker-compose` `crm` user is a **superuser**, and superusers BYPASS Row-Level
-Security. So the app must connect as a non-superuser role, or tenant isolation is a no-op:
-```bash
-docker exec -i personal-crm-db-1 psql -U crm -d crm -f - < scripts/setup_app_role.sql
-```
-Then point `DATABASE_URL` at that role (note `crm_app`, not `crm`):
-```
-DATABASE_URL=postgresql+psycopg://crm_app:crm_app@localhost:5432/crm
-```
-Run migrations as the `crm` owner (above); run the **app/workers** as `crm_app`.
+**Two DB roles, by design.** The `crm` superuser owns the schema and runs migrations
+(`ADMIN_DATABASE_URL`); the app/workers connect as the non-superuser `crm_app`
+(`DATABASE_URL`) so Row-Level Security is actually enforced — superusers bypass RLS, which
+would make tenant isolation a silent no-op. The `crm_app` role is created automatically on
+first `docker compose up` (`scripts/setup_app_role.sql` is mounted into the Postgres init
+dir), and the app **refuses to start** if `DATABASE_URL` points at a role that can bypass
+RLS. Both URLs are pre-filled in `.env.example`.
+
+> Already had a DB volume before this change? The init script only runs on a *fresh* volume.
+> Create the role once on your existing DB with:
+> `docker exec -i personal-crm-db-1 psql -U crm -d crm -f - < scripts/setup_app_role.sql`
 
 ### 6. Run the app
 ```bash

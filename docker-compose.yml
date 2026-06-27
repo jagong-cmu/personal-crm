@@ -12,6 +12,10 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Auto-create the non-superuser 'crm_app' role on first init so RLS is enforced
+      # without a manual step. Runs BEFORE migrations; its ALTER DEFAULT PRIVILEGES makes
+      # every table later created by the 'crm' owner grant DML to crm_app automatically.
+      - ./scripts/setup_app_role.sql:/docker-entrypoint-initdb.d/10-setup-app-role.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
       interval: 5s
