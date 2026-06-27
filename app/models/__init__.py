@@ -45,6 +45,11 @@ class Person(Base):
     primary_email: Mapped[str | None] = mapped_column(Text, index=True)
     company: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(Text)
+    # Manual-merge tombstone (T14): when set, this person was merged INTO another and is
+    # hidden from listings/retrieval. Un-merge clears it back to NULL.
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("people.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -89,6 +94,9 @@ class PersonAlias(Base):
     source_record_id: Mapped[str] = mapped_column(Text, nullable=False)
     person_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("people.id"), nullable=False)
     decided_by: Mapped[str] = mapped_column(Text, nullable=False)  # 'manual' | 'auto'
+    # T14: the loser person this alias moved a source record AWAY from, so un-merge can
+    # repoint exactly that record back. NULL for auto/confident-merge aliases.
+    merged_from_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("people.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -153,6 +161,36 @@ class OAuthCredential(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SyncState(Base):
+    """Per-source incremental-sync cursor (T13).
+
+    Stores the opaque resumption token each polling source needs so the next sync
+    picks up where the last left off instead of re-fetching everything:
+
+      * gmail    -> ``cursor`` holds the last processed Gmail ``historyId``
+      * calendar -> ``cursor`` holds the Calendar ``syncToken``
+      * contacts -> ``cursor`` holds the People API ``syncToken`` (optional)
+
+    On token invalidation (Gmail ``historyId`` 404 / Calendar ``syncToken`` 410) the
+    connector clears the cursor and does a full resync, which reconciles deletions
+    (decision: deletions). One row per (tenant, source).
+    """
+
+    __tablename__ = "sync_state"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_type", name="uq_sync_state_source"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)  # gmail|calendar|contacts
+    cursor: Mapped[str | None] = mapped_column(Text)  # historyId | syncToken | None
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SyncError(Base):
     """Dead-letter row for a record that failed ingest (T7).
 
@@ -179,5 +217,6 @@ __all__ = [
     "Interaction",
     "EmbeddingChunk",
     "OAuthCredential",
+    "SyncState",
     "SyncError",
 ]

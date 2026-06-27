@@ -21,4 +21,8 @@ class QueryRequest(BaseModel):
 @router.post("/query")
 def query(req: QueryRequest, db: Session = Depends(get_tenant_db)) -> dict:
     result = rag.query(db, get_settings().tenant_uuid, req.question)
-    return {"answer": result.answer, "citations": [asdict(c) for c in result.citations]}
+    return {
+        "answer": result.answer,
+        "intent": result.intent,
+        "citations": [asdict(c) for c in result.citations],
+    }

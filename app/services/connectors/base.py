@@ -12,14 +12,25 @@ entity-resolution hardening slice — this is the seam they plug into.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.models import EmbeddingChunk, Person, PersonSource, SyncError
+from app.models import EmbeddingChunk, Interaction, Person, PersonSource, SyncError, SyncState
 from app.services import entity_resolution
 from app.services.embedding import content_hash, embed_documents
+
+#: Separator joining a source record's base id (gmail message id / calendar event id)
+#: to a per-participant key. One message/event fans out to one row per participant; the
+#: shared base id prefix lets deletions reconcile every participant row at once.
+KEY_SEP = "#"
+
+
+def participant_key(base_id: str, participant: str) -> str:
+    """Build the per-(record, participant) source_record_id. See ``apply_deletions``."""
+    return f"{base_id}{KEY_SEP}{participant}"
 
 
 @dataclass
@@ -42,6 +53,7 @@ class IngestResult:
     chunks_embedded: int = 0
     chunks_skipped: int = 0
     errors: int = 0  # T7: records routed to the sync_errors dead-letter table
+    deletions: int = 0  # T8: source records reconciled as deletes this sync
 
 
 def _normalize_email(email: str | None) -> str | None:
@@ -203,3 +215,132 @@ def ingest(db: Session, tenant_id, records: list[NormalizedRecord]) -> IngestRes
 
     db.commit()
     return result
+
+
+# --------------------------------------------------------------------------------------
+# Interactions (timeline rows for the structured query path)
+# --------------------------------------------------------------------------------------
+
+
+def record_interaction(
+    db: Session,
+    tenant_id,
+    *,
+    person: Person,
+    source_type: str,
+    source_record_id: str,
+    interaction_type: str,
+    occurred_at: datetime | None,
+    subject: str | None,
+    external_id: str,
+) -> None:
+    """Upsert one timeline interaction (email/meeting) linking the user to ``person``.
+
+    Idempotent on (tenant, source_type, source_record_id) — re-syncs update in place,
+    never duplicate. ``external_id`` (the gmail message / calendar event id, no
+    participant suffix) is stored in metadata so ``apply_deletions`` can reconcile every
+    participant row of a deleted message/event. A re-appearing record clears any prior
+    soft-delete (deleted_at -> NULL).
+    """
+    stmt = (
+        pg_insert(Interaction)
+        .values(
+            tenant_id=tenant_id,
+            person_id=person.id,
+            source_type=source_type,
+            source_record_id=source_record_id,
+            interaction_type=interaction_type,
+            occurred_at=occurred_at,
+            subject=subject,
+            metadata={"external_id": external_id},
+            deleted_at=None,
+        )
+        .on_conflict_do_update(
+            constraint="uq_interaction_source",
+            set_={
+                "person_id": person.id,
+                "interaction_type": interaction_type,
+                "occurred_at": occurred_at,
+                "subject": subject,
+                "metadata": {"external_id": external_id},
+                "deleted_at": None,
+            },
+        )
+    )
+    db.execute(stmt)
+
+
+# --------------------------------------------------------------------------------------
+# Deletions (decision: deletions)
+# --------------------------------------------------------------------------------------
+
+
+def apply_deletions(
+    db: Session, tenant_id, source_type: str, base_ids: list[str]
+) -> int:
+    """Reconcile deleted source records: soft-delete interactions + drop their embeddings.
+
+    ``base_ids`` are message/event ids WITHOUT the participant suffix. For each we:
+      * soft-delete every interaction row for that record (deleted_at = now), and
+      * hard-delete its embedding chunks so they stop surfacing in retrieval.
+
+    Per-participant rows share the ``base_id#`` source_record_id prefix (see
+    ``participant_key``), so a prefix match reconciles all of them. Returns the number
+    of base ids processed. Retrieval already filters ``deleted_at IS NULL``.
+    """
+    if not base_ids:
+        return 0
+    now = datetime.now(timezone.utc)
+    for base_id in base_ids:
+        prefix = f"{base_id}{KEY_SEP}%"
+        db.execute(
+            update(Interaction)
+            .where(
+                Interaction.tenant_id == tenant_id,
+                Interaction.source_type == source_type,
+                Interaction.source_record_id.like(prefix),
+            )
+            .values(deleted_at=now)
+        )
+        db.execute(
+            delete(EmbeddingChunk).where(
+                EmbeddingChunk.tenant_id == tenant_id,
+                EmbeddingChunk.source_type == source_type,
+                EmbeddingChunk.source_record_id.like(prefix),
+            )
+        )
+    db.commit()
+    return len(base_ids)
+
+
+# --------------------------------------------------------------------------------------
+# Incremental-sync cursors (T13)
+# --------------------------------------------------------------------------------------
+
+
+def get_cursor(db: Session, tenant_id, source_type: str) -> str | None:
+    """Return the stored incremental cursor (historyId / syncToken) or None."""
+    return db.scalar(
+        select(SyncState.cursor).where(
+            SyncState.tenant_id == tenant_id, SyncState.source_type == source_type
+        )
+    )
+
+
+def set_cursor(db: Session, tenant_id, source_type: str, cursor: str | None) -> None:
+    """Persist the incremental cursor for a source. Upsert on (tenant, source)."""
+    stmt = (
+        pg_insert(SyncState)
+        .values(
+            tenant_id=tenant_id,
+            source_type=source_type,
+            cursor=cursor,
+            last_synced_at=datetime.now(timezone.utc),
+        )
+        .on_conflict_do_update(
+            constraint="uq_sync_state_source",
+            set_={"cursor": cursor, "last_synced_at": datetime.now(timezone.utc)},
+        )
+    )
+    db.execute(stmt)
+    db.commit()
