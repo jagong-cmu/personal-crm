@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # pgvector image so the vector type + HNSW index migration apply unchanged.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: crm
+          POSTGRES_DB: crm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crm -d crm"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # Migrations/DDL run as the superuser owner; the suite runs as the non-superuser
+      # crm_app role so the RLS isolation tests are actually meaningful (a superuser
+      # bypasses RLS). Same two-role split as docker-compose / .env.example.
+      ADMIN_DATABASE_URL: postgresql+psycopg://crm:crm@localhost:5432/crm
+      DATABASE_URL: postgresql+psycopg://crm_app:crm_app@localhost:5432/crm
+      TEST_DATABASE_URL: postgresql+psycopg://crm_app:crm_app@localhost:5432/crm
+      # app.config requires these at import; every external call (Voyage/Anthropic/Google)
+      # is mocked or uses a deterministic offline embedder, so test values are fine.
+      ANTHROPIC_API_KEY: test-key
+      VOYAGE_API_KEY: test-key
+      GOOGLE_CLIENT_ID: test-client
+      GOOGLE_CLIENT_SECRET: test-secret
+      TOKEN_ENCRYPTION_KEY: fgSGNLoXZB-gxrAuJEh-w_eJ0a991XqP6L8hxbySrL0=
+      PGPASSWORD: crm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Apply migrations (admin role)
+        run: alembic upgrade head
+
+      - name: Create non-superuser app role (crm_app)
+        run: psql -h localhost -U crm -d crm -f scripts/setup_app_role.sql
+
+      - name: Run tests + RAG eval gate (as crm_app, RLS enforced)
+        run: pytest -q
