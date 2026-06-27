@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.db.session import get_db
+from app.db.session import get_tenant_db
 from app.services.connectors import contacts
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -16,7 +16,7 @@ _CONNECTORS = {"contacts": contacts.sync}
 
 
 @router.post("/{source}")
-def run_sync(source: str, db: Session = Depends(get_db)) -> dict:
+def run_sync(source: str, db: Session = Depends(get_tenant_db)) -> dict:
     fn = _CONNECTORS.get(source)
     if fn is None:
         raise HTTPException(

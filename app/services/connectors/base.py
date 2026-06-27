@@ -17,7 +17,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.models import EmbeddingChunk, Person, PersonSource
+from app.models import EmbeddingChunk, Person, PersonSource, SyncError
+from app.services import entity_resolution
 from app.services.embedding import content_hash, embed_documents
 
 
@@ -40,35 +41,35 @@ class IngestResult:
     sources_upserted: int = 0
     chunks_embedded: int = 0
     chunks_skipped: int = 0
+    errors: int = 0  # T7: records routed to the sync_errors dead-letter table
 
 
 def _normalize_email(email: str | None) -> str | None:
     return email.strip().lower() if email else None
 
 
-def resolve(db: Session, tenant_id, rec: NormalizedRecord) -> tuple[Person, bool]:
-    """Return (person, created). Slice 0: exact normalized-email match, else new."""
-    email = _normalize_email(rec.primary_email)
-    if email:
-        existing = db.scalar(
-            select(Person).where(Person.tenant_id == tenant_id, Person.primary_email == email)
-        )
-        if existing is not None:
-            return existing, False
+def resolve(db: Session, tenant_id, rec: NormalizedRecord) -> tuple[Person | None, bool]:
+    """Return (person, created), delegating to the T4 entity-resolution engine.
 
-    person = Person(
-        tenant_id=tenant_id,
-        display_name=rec.display_name,
-        primary_email=email,
-        company=rec.company,
-        title=rec.title,
-    )
-    db.add(person)
-    db.flush()  # assign id
-    return person, True
+    Follows the alias-first / exact-email / non-human-drop / provisional / fuzzy order.
+    A dropped (non-human/list) record returns (None, False); the ingest loop skips it.
+    The full ResolutionResult (confidence, needs_review, provisional) is available via
+    ``entity_resolution.resolve`` for callers that need it.
+    """
+    result = entity_resolution.resolve(db, tenant_id, rec)
+    return result.person, result.created
 
 
-def _upsert_source(db: Session, tenant_id, person: Person, rec: NormalizedRecord) -> None:
+def _upsert_source(
+    db: Session,
+    tenant_id,
+    person: Person,
+    rec: NormalizedRecord,
+    matched_confidence: float | None = None,
+) -> None:
+    # matched_confidence: the fuzzy(name+company) score when this binding came from a
+    # fuzzy merge; None for exact-email / alias / provisional binds (T4). Persisted so
+    # the manual-review queue (T14) can rank weak matches.
     stmt = (
         pg_insert(PersonSource)
         .values(
@@ -77,11 +78,15 @@ def _upsert_source(db: Session, tenant_id, person: Person, rec: NormalizedRecord
             source_type=rec.source_type,
             source_record_id=rec.source_record_id,
             raw_data=rec.raw,
-            matched_confidence=None,  # exact/null for Slice 0
+            matched_confidence=matched_confidence,
         )
         .on_conflict_do_update(
             constraint="uq_person_source",
-            set_={"raw_data": rec.raw, "person_id": person.id},
+            set_={
+                "raw_data": rec.raw,
+                "person_id": person.id,
+                "matched_confidence": matched_confidence,
+            },
         )
     )
     db.execute(stmt)
@@ -129,19 +134,72 @@ def _embed_pending(db: Session, tenant_id, pending: list[tuple[Person, Normalize
     return len(to_embed), skipped
 
 
+def _short_reason(exc: Exception, limit: int = 300) -> str:
+    """Privacy-safe failure summary: exception type + truncated message ONLY.
+
+    We deliberately derive the reason from the exception, never from the record
+    body/raw/email, so no PII or token payload can leak into sync_errors.
+    """
+    msg = str(exc).replace("\n", " ").strip()
+    if len(msg) > limit:
+        msg = msg[:limit] + "…"
+    return f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+
+
+def _record_sync_error(
+    db: Session, tenant_id, rec: NormalizedRecord, stage: str, exc: Exception
+) -> None:
+    """Write a dead-letter row. Stores ONLY source ids + a short reason — never the body."""
+    db.add(
+        SyncError(
+            tenant_id=tenant_id,
+            source_type=rec.source_type,
+            source_record_id=rec.source_record_id,  # id only
+            stage=stage,
+            reason=_short_reason(exc),
+        )
+    )
+    db.flush()
+
+
 def ingest(db: Session, tenant_id, records: list[NormalizedRecord]) -> IngestResult:
     result = IngestResult()
     pending: list[tuple[Person, NormalizedRecord]] = []
     for rec in records:
-        person, created = resolve(db, tenant_id, rec)
-        result.people_created += int(created)
-        result.people_matched += int(not created)
-        _upsert_source(db, tenant_id, person, rec)
+        # Per-record isolation: a SAVEPOINT lets one bad record roll back without
+        # discarding the records already handled in this sync.
+        stage = "resolve"
+        try:
+            with db.begin_nested():
+                # Call the engine directly (not the resolve() wrapper) so the fuzzy
+                # match confidence reaches _upsert_source for the review queue (T14).
+                res = entity_resolution.resolve(db, tenant_id, rec)
+                if res.person is None:
+                    # Non-human / list record intentionally dropped by resolution
+                    # (T4). Not a failure — skip it without a dead-letter row.
+                    continue
+                stage = "upsert"
+                _upsert_source(db, tenant_id, res.person, rec, res.confidence)
+        except Exception as exc:  # noqa: BLE001 - isolate any per-record failure
+            result.errors += 1
+            _record_sync_error(db, tenant_id, rec, stage, exc)
+            continue
+        result.people_created += int(res.created)
+        result.people_matched += int(not res.created)
         result.sources_upserted += 1
-        pending.append((person, rec))
+        pending.append((res.person, rec))
 
-    embedded, skipped = _embed_pending(db, tenant_id, pending)
-    result.chunks_embedded = embedded
-    result.chunks_skipped = skipped
+    # Embedding: Voyage already retries with backoff; if it still fails, dead-letter
+    # the affected records instead of crashing the whole sync.
+    try:
+        with db.begin_nested():
+            embedded, skipped = _embed_pending(db, tenant_id, pending)
+        result.chunks_embedded = embedded
+        result.chunks_skipped = skipped
+    except Exception as exc:  # noqa: BLE001 - embed batch failed after backoff
+        for _, rec in pending:
+            result.errors += 1
+            _record_sync_error(db, tenant_id, rec, "embed", exc)
+
     db.commit()
     return result
