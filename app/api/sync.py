@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -17,6 +18,30 @@ from app.db.session import get_tenant_db
 from app.services.connectors import calendar, contacts, gmail, linkedin
 
 router = APIRouter(prefix="/sync", tags=["sync"])
+
+
+def _google_http_detail(source: str, exc: HttpError) -> tuple[int, str]:
+    """Map a Google API HttpError to (status, actionable message) for the client.
+
+    The most common local-dev case is a 403 'accessNotConfigured' — the API for
+    this source isn't enabled in the Google Cloud project — which otherwise 500s
+    as an opaque 'Internal Server Error'. Surface what the user must actually do.
+    """
+    status = getattr(exc, "status_code", None) or getattr(getattr(exc, "resp", None), "status", 502)
+    reason = (getattr(exc, "reason", "") or "").strip() or "Google API error"
+    api = {"contacts": "People", "gmail": "Gmail", "calendar": "Calendar"}.get(source, source)
+    if status == 403 and ("has not been used" in reason or "accessNotConfigured" in reason):
+        return 502, (
+            f"Google's {api} API isn't enabled for your Cloud project. Enable it in "
+            "the Google Cloud console (APIs & Services → Library), wait ~1 minute, "
+            "then retry the sync."
+        )
+    if status in (401, 403):
+        return 502, (
+            f"Google denied the {api} sync ({status}). Reconnect Google to refresh "
+            f"access, then retry. ({reason})"
+        )
+    return 502, f"Google {api} sync failed ({status}): {reason}"
 
 _CONNECTORS = {
     "contacts": contacts.sync,
@@ -54,4 +79,7 @@ def run_sync(source: str, db: Session = Depends(get_tenant_db)) -> dict:
         result = fn(db, get_settings().tenant_uuid)
     except RuntimeError as exc:  # e.g. not connected
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HttpError as exc:  # API disabled / auth / quota — give an actionable message
+        status, detail = _google_http_detail(source, exc)
+        raise HTTPException(status_code=status, detail=detail) from exc
     return {"source": source, "result": asdict(result)}
