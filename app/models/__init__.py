@@ -19,6 +19,8 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
+    Integer,
     Text,
     UniqueConstraint,
     func,
@@ -209,6 +211,74 @@ class SyncError(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserProfile(Base):
+    """The user's OWN background/interests, powering Discover (contact generator).
+
+    One row per tenant (uq_user_profile_tenant) so save = upsert. Captured from a
+    best-effort LinkedIn scrape or the manual import form. No stored embedding — the
+    profile vector is recomputed per discovery run (one cheap embed_query call).
+    """
+
+    __tablename__ = "user_profile"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_user_profile_tenant"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    display_name: Mapped[str | None] = mapped_column(Text)
+    headline: Mapped[str | None] = mapped_column(Text)
+    location: Mapped[str | None] = mapped_column(Text)
+    schools: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    companies: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    skills: Mapped[list[str]] = mapped_column(JSONB, default=list)  # interests/skills
+    about: Mapped[str | None] = mapped_column(Text)
+    raw: Mapped[dict] = mapped_column(JSONB, default=dict)  # scrape/import snapshot
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Prospect(Base):
+    """A generated outreach candidate (Discover). Kept SEPARATE from the real network
+    (people) until promoted via 'Save to network' (base.ingest, source_type=contactgen).
+
+    Contact fields (email/phone) are provider-sourced ONLY — never LLM-fabricated.
+    uq_prospect_dedupe makes re-runs idempotent. score_breakdown carries the transparent
+    per-feature scoring (see app/services/scoring.py).
+    """
+
+    __tablename__ = "prospect"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "dedupe_key", name="uq_prospect_dedupe"),
+        Index("ix_prospect_tenant_status", "tenant_id", "status"),
+        Index("ix_prospect_tenant_score", "tenant_id", "score"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text)  # from Hunter ONLY
+    phone: Mapped[str | None] = mapped_column(Text)  # from provider ONLY
+    company: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    location: Mapped[str | None] = mapped_column(Text)
+    school: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)  # Brave search result link
+    score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 0..100
+    score_breakdown: Mapped[dict] = mapped_column(JSONB, default=dict)
+    relation_summary: Mapped[str | None] = mapped_column(Text)  # None if LLM unavailable
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="new")  # new|saved|dismissed
+    dedupe_key: Mapped[str] = mapped_column(Text, nullable=False)
+    promoted_person_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("people.id"))
+    raw: Mapped[dict] = mapped_column(JSONB, default=dict)  # provider payloads (audit)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 __all__ = [
     "Person",
     "PersonSource",
@@ -219,4 +289,6 @@ __all__ = [
     "OAuthCredential",
     "SyncState",
     "SyncError",
+    "UserProfile",
+    "Prospect",
 ]

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api import auth, people, query, sources, sync
+from app.api import auth, discover, people, query, sources, sync
 from app.config import get_settings
 from app.db.session import engine
 
@@ -78,6 +78,7 @@ app.include_router(sync.router)
 app.include_router(query.router)
 app.include_router(people.router)
 app.include_router(sources.router)
+app.include_router(discover.router)
 
 
 @app.get("/healthz")
