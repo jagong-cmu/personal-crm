@@ -12,7 +12,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -34,7 +34,7 @@ from app.services.scoring import (
 logger = logging.getLogger(__name__)
 
 SOURCE_TYPE = "contactgen"
-_DEFAULT_MAX = 8
+_DEFAULT_MAX = 15
 _HARD_MAX = 15
 
 
@@ -143,8 +143,13 @@ def run_discovery(
     *,
     provider: DiscoveryProvider,
     max_candidates: int = _DEFAULT_MAX,
+    replace: bool = False,
 ) -> DiscoverySummary:
     """End to end: profile → Brave discovery → Hunter email → score → persist prospects.
+
+    When ``replace`` is set (the "refresh" action), still-``new`` prospects are dismissed
+    before the run so the page swaps in a fresh batch. Dismissed rows stay in the dedupe
+    set, so the new batch is genuinely new people — and bookmarked/saved rows survive.
 
     Raises ValueError if no profile exists yet. Per-candidate failures are isolated and
     logged (the run continues), mirroring the ingest pipeline's per-record isolation.
@@ -153,6 +158,15 @@ def run_discovery(
     profile = get_profile(db, tenant_id)
     if profile is None:
         raise ValueError("Capture your profile first, then run discovery.")
+
+    if replace:
+        # Dismiss (don't delete) so dedupe still skips them — the fresh batch won't repeat
+        # anyone. Not committed yet; it lands with this run's final commit.
+        db.execute(
+            update(Prospect)
+            .where(Prospect.tenant_id == tenant_id, Prospect.status == "new")
+            .values(status="dismissed")
+        )
 
     data = _profile_data(profile)
 

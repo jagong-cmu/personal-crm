@@ -4,9 +4,10 @@ Endpoints:
   GET   /discover/profile            — current profile + whether providers are configured
   PUT   /discover/profile            — save/replace the profile (manual import)
   POST  /discover/profile/scrape     — best-effort LinkedIn URL scrape (does NOT persist)
-  POST  /discover/run                — generate prospects (needs Brave + Hunter keys)
+  POST  /discover/run                — generate prospects (needs Brave + Hunter keys);
+                                       refresh=true swaps in a fresh batch
   GET   /discover/prospects          — list prospects (optionally by status), score desc
-  PATCH /discover/prospects/{id}     — update status (saved | dismissed)
+  PATCH /discover/prospects/{id}     — update status (bookmarked | new | saved | dismissed)
   POST  /discover/prospects/{id}/save — promote a prospect into the real network
 """
 from __future__ import annotations
@@ -53,10 +54,11 @@ class ScrapeIn(BaseModel):
 
 class RunIn(BaseModel):
     max_candidates: int | None = None
+    refresh: bool = False  # dismiss current suggestions and discover a fresh batch
 
 
 class StatusIn(BaseModel):
-    status: str  # saved | dismissed
+    status: str  # saved | dismissed | bookmarked | new
 
 
 # --------------------------------------------------------------------------------------
@@ -155,7 +157,9 @@ def run(req: RunIn, db: Session = Depends(get_tenant_db)) -> dict:
         )
     kwargs = {} if req.max_candidates is None else {"max_candidates": req.max_candidates}
     try:
-        summary = discover.run_discovery(db, _tenant(), provider=provider, **kwargs)
+        summary = discover.run_discovery(
+            db, _tenant(), provider=provider, replace=req.refresh, **kwargs
+        )
     except ValueError as exc:  # no profile yet
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProviderError as exc:  # bad key / provider outage
@@ -177,8 +181,10 @@ def list_prospects(status: str | None = None, db: Session = Depends(get_tenant_d
 def update_prospect(
     prospect_id: uuid.UUID, req: StatusIn, db: Session = Depends(get_tenant_db)
 ) -> dict:
-    if req.status not in ("new", "saved", "dismissed"):
-        raise HTTPException(status_code=400, detail="status must be new|saved|dismissed")
+    if req.status not in ("new", "saved", "dismissed", "bookmarked"):
+        raise HTTPException(
+            status_code=400, detail="status must be new|saved|dismissed|bookmarked"
+        )
     p = db.scalar(
         select(Prospect).where(Prospect.tenant_id == _tenant(), Prospect.id == prospect_id)
     )
