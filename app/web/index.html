@@ -508,29 +508,45 @@ function drawDscRun(){
     box.innerHTML=`<div class="reconnect dsc-note"><span class="ic">⚙</span><div><b>Discovery not configured.</b> Add <code>BRAVE_API_KEY</code> and <code>HUNTER_API_KEY</code> to your <code>.env</code> to generate contacts. Your profile is saved and ready.</div></div>`;
     return;
   }
-  box.innerHTML=`<button class="btn" data-dsc="run" id="dsc-runbtn">Run discovery →</button> <span class="sub" style="margin-left:8px">finds people who match your background</span>`;
+  const has=(d.prospects||[]).some(p=>p.status!=='dismissed');
+  box.innerHTML = has
+    ? `<button class="btn" data-dsc="refresh" id="dsc-runbtn">Refresh — 15 new →</button> <span class="sub" style="margin-left:8px">discovers 15 fresh people · bookmarked ones stay</span>`
+    : `<button class="btn" data-dsc="run" id="dsc-runbtn">Run discovery →</button> <span class="sub" style="margin-left:8px">finds up to 15 people who match your background</span>`;
+}
+function prosButtons(p){
+  if(p.status==='saved') return `<span class="tag">saved ✓</span>`;
+  const bm = p.status==='bookmarked'
+    ? `<button class="btn ghost sm" data-pros-bookmark="${p.id}" data-on="0" title="Remove bookmark">★ Bookmarked</button>`
+    : `<button class="btn ghost sm" data-pros-bookmark="${p.id}" data-on="1" title="Bookmark — kept when you refresh">☆ Bookmark</button>`;
+  return `${bm}<button class="btn sm" data-pros-save="${p.id}">Save to network</button><button class="btn ghost sm" data-pros-dismiss="${p.id}">Dismiss</button>`;
+}
+function prosCard(p){
+  const b=p.score_breakdown||{}; const feat=b.features||{};
+  const contact = p.email?`<span class="pcontact">✉ ${esc(p.email)}</span>`:(p.phone?`<span class="pcontact">☎ ${esc(p.phone)}</span>`:`<span class="pcontact none">no contact found</span>`);
+  const bars=['geography','school','company','interest'].map(k=>`<span>${k} ${Math.round((feat[k]||0)*100)}%</span>`).join('');
+  const pct=Math.max(2,p.score);
+  return `<article class="card" id="pros-${p.id}">
+    <div class="pros-hd"><div style="flex:1;min-width:0"><div class="cname">${esc(p.name)}${p.company?` <span class="at">at ${esc(p.company)}</span>`:''}</div>
+      <div class="cmail">${esc([p.title,p.location,p.school].filter(Boolean).join(' · '))}</div></div>
+      <div class="scorebig" title="likelihood to respond">${p.score}</div></div>
+    <div class="prosc"><div class="score"><span class="lbl" style="margin:0">will reply?</span><div class="sbar"><div class="sfill" style="width:${pct}%"></div></div><span class="sval">${p.score}/100</span></div>
+      <div class="brk">${bars}</div></div>
+    ${p.relation_summary?`<p class="snip" data-pretext>${esc(p.relation_summary)}</p>`:''}
+    <div class="pros-hd" style="margin-top:10px;align-items:center">${contact}
+      <div class="btnrow" style="margin:0">${prosButtons(p)}</div></div>
+    ${p.source_url?`<div class="cmail" style="margin-top:8px"><a href="${esc(p.source_url)}" target="_blank" rel="noopener">source ↗</a></div>`:''}
+  </article>`;
 }
 function drawProspects(){
   const box=document.getElementById('dsc-prospects'); if(!box) return;
-  const list=(view._dsc.prospects||[]).filter(p=>p.status!=='dismissed');
-  if(!list.length){ box.innerHTML=`<div class="state"><div class="ameta"><span class="p"></span> no prospects yet</div><h3>Nothing discovered yet</h3><p>${view._dsc.profile?'Run discovery to generate matched contacts.':'Save your profile, then run discovery.'}</p></div>`; return; }
-  box.innerHTML=`<div class="cites-head"><p class="lbl">Prospects</p><span class="rule"></span><span class="count">${list.length} ranked</span></div>`+list.map(p=>{
-    const b=p.score_breakdown||{}; const feat=b.features||{};
-    const contact = p.email?`<span class="pcontact">✉ ${esc(p.email)}</span>`:(p.phone?`<span class="pcontact">☎ ${esc(p.phone)}</span>`:`<span class="pcontact none">no contact found</span>`);
-    const bars=['geography','school','company','interest'].map(k=>`<span>${k} ${Math.round((feat[k]||0)*100)}%</span>`).join('');
-    const pct=Math.max(2,p.score); const saved=p.status==='saved';
-    return `<article class="card" id="pros-${p.id}">
-      <div class="pros-hd"><div style="flex:1;min-width:0"><div class="cname">${esc(p.name)}${p.company?` <span class="at">at ${esc(p.company)}</span>`:''}</div>
-        <div class="cmail">${esc([p.title,p.location,p.school].filter(Boolean).join(' · '))}</div></div>
-        <div class="scorebig" title="likelihood to respond">${p.score}</div></div>
-      <div class="prosc"><div class="score"><span class="lbl" style="margin:0">will reply?</span><div class="sbar"><div class="sfill" style="width:${pct}%"></div></div><span class="sval">${p.score}/100</span></div>
-        <div class="brk">${bars}</div></div>
-      ${p.relation_summary?`<p class="snip" data-pretext>${esc(p.relation_summary)}</p>`:''}
-      <div class="pros-hd" style="margin-top:10px;align-items:center">${contact}
-        <div class="btnrow" style="margin:0">${saved?`<span class="tag">saved ✓</span>`:`<button class="btn sm" data-pros-save="${p.id}">Save to network</button><button class="btn ghost sm" data-pros-dismiss="${p.id}">Dismiss</button>`}</div></div>
-      ${p.source_url?`<div class="cmail" style="margin-top:8px"><a href="${esc(p.source_url)}" target="_blank" rel="noopener">source ↗</a></div>`:''}
-    </article>`;
-  }).join('');
+  const all=(view._dsc.prospects||[]).filter(p=>p.status!=='dismissed');
+  if(!all.length){ box.innerHTML=`<div class="state"><div class="ameta"><span class="p"></span> no prospects yet</div><h3>Nothing discovered yet</h3><p>${view._dsc.profile?'Run discovery to generate matched contacts.':'Save your profile, then run discovery.'}</p></div>`; return; }
+  const kept=all.filter(p=>p.status==='bookmarked'||p.status==='saved');
+  const fresh=all.filter(p=>p.status==='new');
+  let html='';
+  if(kept.length) html+=`<div class="cites-head"><p class="lbl">Bookmarked</p><span class="rule"></span><span class="count">${kept.length} kept</span></div>`+kept.map(prosCard).join('');
+  if(fresh.length) html+=`<div class="cites-head"${kept.length?' style="margin-top:16px"':''}><p class="lbl">Suggestions</p><span class="rule"></span><span class="count">${fresh.length} ranked</span></div>`+fresh.map(prosCard).join('');
+  box.innerHTML=html;
   pretextize(box);
 }
 async function doDscScrape(){
@@ -573,8 +589,25 @@ async function doProsDismiss(id){
   try{ await api('/discover/prospects/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'dismissed'})}); }
   catch(e){ toast('Failed: '+e.message,null,true); return; }
   const p=(view._dsc.prospects||[]).find(x=>x.id===id); if(p) p.status='dismissed';
-  updateDscSub(); drawProspects();
+  updateDscSub(); drawDscRun(); drawProspects();
   toast('Dismissed');
+}
+async function doProsBookmark(id,on){
+  const status=on?'bookmarked':'new';
+  try{ await api('/discover/prospects/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})}); }
+  catch(e){ toast('Failed: '+e.message,null,true); return; }
+  const p=(view._dsc.prospects||[]).find(x=>x.id===id); if(p) p.status=status;
+  drawProspects();
+  toast(on?'Bookmarked — kept when you refresh':'Bookmark removed');
+}
+async function doDscRefresh(){
+  const btn=document.getElementById('dsc-runbtn'); if(btn){ btn.disabled=true; btn.textContent='Discovering… (~30s)'; }
+  let r; try{ r=await post('/discover/run',{refresh:true}); }
+  catch(e){ toast('Refresh failed: '+e.message,null,true); drawDscRun(); return; }
+  const s=r.summary||{};
+  try{ const pr=await api('/discover/prospects'); view._dsc.prospects=pr.prospects; }catch(_){}
+  updateDscSub(); drawDscRun(); drawProspects();
+  toast(`Refreshed · ${s.created||0} new${s.skipped_dupes?` · ${s.skipped_dupes} dupes`:''}${s.contactless?` · ${s.contactless} without contact`:''}`);
 }
 
 function viewSources(){
@@ -641,7 +674,7 @@ document.getElementById('scrim').onclick=closeDrawer;
 
 /* ───────── EVENTS ───────── */
 document.addEventListener('click', e=>{
-  const t=e.target.closest('[data-go],[data-ask],[data-chip],[data-merge],[data-keep],[data-connect],[data-reconnect],[data-sync],[data-import],[data-dsc],[data-pros-save],[data-pros-dismiss]');
+  const t=e.target.closest('[data-go],[data-ask],[data-chip],[data-merge],[data-keep],[data-connect],[data-reconnect],[data-sync],[data-import],[data-dsc],[data-pros-save],[data-pros-dismiss],[data-pros-bookmark]');
   if(!t) return;
   if(t.dataset.go!==undefined) return go(t.dataset.go);
   if(t.dataset.connect!==undefined || t.dataset.reconnect!==undefined){ window.location='/auth/google/start'; return; }
@@ -657,10 +690,12 @@ document.addEventListener('click', e=>{
     else if(a==='scrape') doDscScrape();
     else if(a==='save') doDscSave();
     else if(a==='run') doDscRun();
+    else if(a==='refresh') doDscRefresh();
     return;
   }
   if(t.dataset.prosSave!==undefined) return doProsSave(t.dataset.prosSave);
   if(t.dataset.prosDismiss!==undefined) return doProsDismiss(t.dataset.prosDismiss);
+  if(t.dataset.prosBookmark!==undefined) return doProsBookmark(t.dataset.prosBookmark, t.dataset.on==='1');
 });
 document.addEventListener('keydown', e=>{
   if(e.key==='Enter' && e.target.classList && e.target.classList.contains('ask-input')){ e.preventDefault(); doAsk(e.target.textContent); }

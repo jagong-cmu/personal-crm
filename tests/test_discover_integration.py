@@ -188,3 +188,46 @@ def test_prospects_are_tenant_isolated(db_tenant, monkeypatch):
         assert db2.query(Prospect).filter(Prospect.tenant_id == tenant).count() == 0
     finally:
         db2.close()
+
+
+def test_refresh_dismisses_new_but_keeps_bookmarked(db_tenant, monkeypatch):
+    """replace=True swaps in a fresh batch: 'new' rows are dismissed (not repeated),
+    bookmarked rows survive, and the fresh candidates are created."""
+    from app.models import Prospect
+    from app.services import discover
+
+    db, tenant = db_tenant
+    _patch_externals(monkeypatch)
+    _save_profile(db, tenant)
+
+    discover.run_discovery(
+        db, tenant,
+        provider=_FakeProvider([_candidate("Jane Doe"), _candidate("John Roe")]),
+        max_candidates=8,
+    )
+    jane = db.query(Prospect).filter(Prospect.tenant_id == tenant, Prospect.name == "Jane Doe").one()
+    jane.status = "bookmarked"
+    db.commit()
+
+    # Refresh with a brand-new candidate.
+    summary = discover.run_discovery(
+        db, tenant,
+        provider=_FakeProvider([_candidate("Mary Poe")]),
+        max_candidates=8,
+        replace=True,
+    )
+    assert summary.created == 1
+
+    by_status = {r.name: r.status for r in db.query(Prospect).filter(Prospect.tenant_id == tenant)}
+    assert by_status["Jane Doe"] == "bookmarked"   # bookmarked survives the refresh
+    assert by_status["John Roe"] == "dismissed"    # the other 'new' suggestion is swapped out
+    assert by_status["Mary Poe"] == "new"          # the fresh batch
+
+    # A dismissed suggestion is not re-surfaced on a later run (still in the dedupe set).
+    summary2 = discover.run_discovery(
+        db, tenant,
+        provider=_FakeProvider([_candidate("John Roe")]),
+        max_candidates=8,
+    )
+    assert summary2.created == 0
+    assert summary2.skipped_dupes == 1
