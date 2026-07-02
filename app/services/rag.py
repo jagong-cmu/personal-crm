@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import EmbeddingChunk, Interaction, Person
+from app.services import llm
 from app.services.embedding import embed_query
 
 _SYSTEM = (
@@ -41,14 +42,8 @@ _SYSTEM = (
 #: strangers — the retrieval layer's defense against forced/irrelevant citations.
 _SEMANTIC_MIN_SCORE = 0.05
 
-_client: anthropic.Anthropic | None = None
-
-
 def _anthropic() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(api_key=get_settings().anthropic_api_key)
-    return _client
+    return llm.client()
 
 
 @dataclass

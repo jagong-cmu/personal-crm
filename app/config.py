@@ -40,6 +40,18 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-4-8"
     rag_top_k: int = Field(default=8, ge=1, le=50)
 
+    # Discover (contact generator). Both keys must be present for live discovery runs;
+    # profile capture/scoring/prospects all work without them (feature degrades, see
+    # app/services/providers/real.py::get_provider). Brave Search = web/person discovery,
+    # Hunter.io = email lookup. Contact info is copied verbatim from the provider.
+    brave_api_key: str = ""
+    hunter_api_key: str = ""
+
+    @property
+    def discovery_enabled(self) -> bool:
+        """True when both Discover providers are configured (Brave + Hunter)."""
+        return bool(self.brave_api_key and self.hunter_api_key)
+
     @property
     def migration_url(self) -> str:
         """DB URL for migrations/DDL — the admin role when set, else the runtime URL."""

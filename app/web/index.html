@@ -271,10 +271,12 @@ const ICONS={
   people:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0" stroke-linecap="round"/><path d="M16 6.2a3.2 3.2 0 0 1 0 6M17 14.5a5.5 5.5 0 0 1 3.5 4.5" stroke-linecap="round"/>',
   review:'<path d="M4 7h11M4 12h11M4 17h7" stroke-linecap="round"/><path d="M17.5 15.5l2 2 3-3.5" stroke-linecap="round" stroke-linejoin="round"/>',
   sources:'<rect x="3.5" y="4" width="17" height="6" rx="2"/><rect x="3.5" y="14" width="17" height="6" rx="2"/>',
+  discover:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4" stroke-linecap="round"/><path d="M11 8v6M8 11h6" stroke-linecap="round"/>',
 };
 const ROUTES=[
   {id:'ask',label:'Ask',title:'Ask your network'},
   {id:'people',label:'People',title:'People'},
+  {id:'discover',label:'Discover',title:'Discover contacts'},
   {id:'review',label:'Review',title:'Review queue'},
   {id:'sources',label:'Sources',title:'Sources'},
 ];
@@ -377,9 +379,27 @@ async function doAsk(q){
   pretextize(block);
 }
 
+const PPL_CSS = `<style>
+  .pcard{cursor:pointer;transition:border-color .14s, box-shadow .14s, transform .06s;}
+  .pcard:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));box-shadow:var(--shadow);}
+  .pcard:active{transform:translateY(1px);}
+  .pcard .chev{position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--ink-faint);opacity:0;transition:opacity .14s;}
+  .pcard{position:relative;}
+  .pcard:hover .chev{opacity:1;}
+  .pdesc{font-size:15px;line-height:1.6;color:var(--ink-soft);margin:2px 0 0;}
+  .pmeta-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;}
+  .ptl{display:flex;flex-direction:column;gap:0;margin-top:6px;}
+  .ptl-row{display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--line-soft);font-size:13.5px;}
+  .ptl-row .when{font-family:var(--mono);font-size:11px;color:var(--ink-faint);flex:none;width:88px;}
+  .ptl-row .what{color:var(--ink-soft);min-width:0;}
+  .li-btn{display:inline-flex;align-items:center;gap:7px;}
+</style>`;
+
+const _SRC_LABEL={contacts:'Google Contacts',gmail:'Gmail',calendar:'Calendar',linkedin:'LinkedIn',contactgen:'Discover'};
+
 async function viewPeople(){
-  view.innerHTML = `<div class="col-wide"><div class="pagehead"><h2>People</h2><span class="sub" id="p-sub">loading…</span></div>
-    <p class="pageintro">Everyone resolved from your connected sources. Search by name or company.</p>
+  view.innerHTML = PPL_CSS + `<div class="col-wide"><div class="pagehead"><h2>People</h2><span class="sub" id="p-sub">loading…</span></div>
+    <p class="pageintro">Everyone resolved from your connected sources. Search by name or company, then tap anyone for the full profile.</p>
     <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4" stroke-linecap="round"/></svg>
       <input id="psearch" placeholder="Search people…" aria-label="Search people"/></label>
     <div class="plist" id="plist"></div></div>`;
@@ -388,15 +408,73 @@ async function viewPeople(){
   catch(e){ document.getElementById('plist').innerHTML=`<div class="state err"><h3>Couldn't load people</h3><p>${esc(e.message)}</p></div>`; return; }
   document.getElementById('p-sub').textContent = `${people.length} of ${fmt(APP.stats.people)}`;
   const list=document.getElementById('plist');
+  const chev='<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const draw=(qq='')=>{
     const f=people.filter(p=>((p.display_name||'')+' '+(p.company||'')).toLowerCase().includes(qq.toLowerCase()));
-    list.innerHTML = f.length? f.map(p=>`<div class="pcard"><div class="pn">${esc(p.display_name||'Unknown')}${p.company?` <span class="at">at ${esc(p.company)}</span>`:''}</div>
-      ${p.primary_email?`<div class="pe">${esc(p.primary_email)}</div>`:''}${p.title?`<div class="ptags"><span class="tag">${esc(p.title)}</span></div>`:''}</div>`).join('')
+    list.innerHTML = f.length? f.map(p=>`<div class="pcard" data-person="${p.id}" role="button" tabindex="0" aria-label="Open ${esc(p.display_name||'Unknown')}"><div class="pn">${esc(p.display_name||'Unknown')}${p.company?` <span class="at">at ${esc(p.company)}</span>`:''}</div>
+      ${p.primary_email?`<div class="pe">${esc(p.primary_email)}</div>`:''}${p.title?`<div class="ptags"><span class="tag">${esc(p.title)}</span></div>`:''}${chev}</div>`).join('')
       : `<div class="state"><h3>No matches</h3><p>Nobody matches “${esc(qq)}”.</p></div>`;
   };
   if(people.length===0){ list.innerHTML=`<div class="state"><div class="ameta"><span class="p"></span> empty</div><h3>No people yet</h3><p>Connect a source and run a sync to populate your network.</p><button class="btn" data-go="sources">Go to sources →</button></div>`; return; }
   draw();
   document.getElementById('psearch').addEventListener('input',e=>draw(e.target.value));
+}
+
+function _linkedinLink(d){
+  if(d.linkedin_url) return {href:d.linkedin_url, label:'View LinkedIn profile'};
+  const q=encodeURIComponent([d.display_name,d.company].filter(Boolean).join(' '));
+  return {href:`https://www.linkedin.com/search/results/people/?keywords=${q}`, label:'Find on LinkedIn'};
+}
+function _describePerson(d){
+  const s=[];
+  const who = d.title && d.company ? `${d.display_name||'This person'} is ${d.title} at ${d.company}.`
+    : d.company ? `${d.display_name||'This person'} is at ${d.company}.`
+    : d.title ? `${d.display_name||'This person'} works as ${d.title}.`
+    : `${d.display_name||'This person'} is in your network.`;
+  s.push(who);
+  const srcs=[...new Set((d.sources||[]).map(x=>_SRC_LABEL[x.source_type]||x.source_type))];
+  if(srcs.length) s.push(`You know them through ${srcs.join(', ')}.`);
+  const ix=d.recent_interactions||[];
+  if(ix.length){
+    const last=ix[0];
+    const when=last.occurred_at?new Date(last.occurred_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'recently';
+    const verb=(last.interaction_type||'interaction').replace(/_/g,' ');
+    s.push(`Your most recent touchpoint was a ${verb}${last.subject?` — “${last.subject}”`:''} on ${when}. ${ix.length} recent interaction${ix.length>1?'s':''} on record.`);
+  } else {
+    s.push('No email or meeting history recorded yet.');
+  }
+  return s.join(' ');
+}
+async function showPerson(id){
+  view.innerHTML = PPL_CSS + `<div class="col-wide">
+    <button class="btn ghost sm" data-people-back>← People</button>
+    <div id="pdetail" style="margin-top:14px"><div class="ameta"><span class="p"></span> loading profile…</div></div></div>`;
+  let d;
+  try{ d=await api('/people/'+id); }
+  catch(e){ document.getElementById('pdetail').innerHTML=`<div class="state err"><h3>Couldn't load profile</h3><p>${esc(e.message)}</p></div>`; return; }
+  const li=_linkedinLink(d);
+  const srcTags=[...new Set((d.sources||[]).map(x=>_SRC_LABEL[x.source_type]||x.source_type))].map(x=>`<span class="tag">${esc(x)}</span>`).join('');
+  const ix=d.recent_interactions||[];
+  const timeline = ix.length? `<div class="ptl">${ix.map(i=>{
+    const when=i.occurred_at?new Date(i.occurred_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):'—';
+    const verb=(i.interaction_type||'').replace(/_/g,' ');
+    return `<div class="ptl-row"><span class="when">${esc(when)}</span><span class="what"><b>${esc(verb||'interaction')}</b>${i.subject?` · ${esc(i.subject)}`:''} <span class="at">via ${esc(_SRC_LABEL[i.source_type]||i.source_type)}</span></span></div>`;
+  }).join('')}</div>` : '';
+  document.getElementById('pdetail').innerHTML = `<article class="card">
+    <div class="cname" style="font-size:22px">${esc(d.display_name||'Unknown')}${d.company?` <span class="at">at ${esc(d.company)}</span>`:''}</div>
+    ${d.title?`<div class="cmail">${esc(d.title)}</div>`:''}
+    ${d.primary_email?`<div class="cmail"><a href="mailto:${esc(d.primary_email)}">${esc(d.primary_email)}</a></div>`:''}
+    <p class="pdesc" data-pretext>${esc(_describePerson(d))}</p>
+    <div class="pmeta-row">
+      <a class="btn sm li-btn" href="${esc(li.href)}" target="_blank" rel="noopener">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4.98 3.5A2.5 2.5 0 1 0 5 8.5a2.5 2.5 0 0 0-.02-5zM3 9h4v12H3zM9 9h3.8v1.7h.05c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.78 2.65 4.78 6.1V21h-4v-5.3c0-1.27-.02-2.9-1.77-2.9-1.77 0-2.04 1.38-2.04 2.8V21H9z"/></svg>
+        ${esc(li.label)} ↗</a>
+      ${!d.linkedin_url?`<span class="sub">no stored profile — searches by name</span>`:''}
+    </div>
+    ${srcTags?`<div class="pmeta-row" style="margin-top:14px"><span class="lbl" style="margin:0">Sources</span>${srcTags}</div>`:''}
+    ${timeline?`<div class="cites-head" style="margin-top:16px"><p class="lbl">Recent activity</p><span class="rule"></span><span class="count">${ix.length}</span></div>${timeline}`:''}
+  </article>`;
+  const block=document.getElementById('pdetail'); if(block) pretextize(block);
 }
 
 async function viewReview(){
@@ -440,6 +518,172 @@ function doKeep(i){
   APP.reviewCount=Math.max(0,APP.reviewCount-1); renderNav('review');
   const sub=document.getElementById('rq-sub'); if(sub) sub.textContent = APP.reviewCount? `${APP.reviewCount} to resolve`:'all caught up';
   toast('Kept separate for this session');
+}
+
+/* ───────── DISCOVER ───────── */
+const DSC_CSS = `<style>
+  .dform{display:flex;flex-direction:column;gap:12px;}
+  .dfield{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--ink-soft);flex:1;}
+  .dfield input,.dfield textarea{font:inherit;font-size:14px;color:var(--ink);background:var(--paper-sun);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 11px;width:100%;}
+  .dfield textarea{min-height:64px;resize:vertical;}
+  .drow{display:flex;gap:9px;align-items:flex-end;}
+  .prosc{display:flex;flex-direction:column;gap:6px;margin:11px 0;}
+  .brk{display:flex;gap:7px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--ink-faint);}
+  .brk span{background:var(--line-soft);border-radius:20px;padding:2px 8px;}
+  .pcontact{font-family:var(--mono);font-size:12.5px;color:var(--accent-ink);}
+  .pcontact.none{color:var(--amber);}
+  .pros-hd{display:flex;align-items:flex-start;gap:10px;justify-content:space-between;}
+  .scorebig{font-family:var(--mono);font-size:22px;font-weight:500;color:var(--accent-ink);flex:none;}
+  .dsc-note code{font-family:var(--mono);font-size:11px;background:var(--line-soft);padding:1px 5px;border-radius:4px;}
+</style>`;
+
+async function viewDiscover(){
+  view.innerHTML = DSC_CSS + `<div class="col-wide">
+    <div class="pagehead"><h2>Discover contacts</h2><span class="sub" id="dsc-sub">loading…</span></div>
+    <p class="pageintro">Find people who share your background and interests, ranked by how likely they are to reply. Contact details come from real providers — never invented.</p>
+    <div id="dsc-profile"></div>
+    <div id="dsc-run" style="margin:18px 0"></div>
+    <div id="dsc-prospects"></div>
+  </div>`;
+  let meta, pros;
+  try{ [meta,pros]=await Promise.all([api('/discover/profile'),api('/discover/prospects')]); }
+  catch(e){ document.getElementById('dsc-prospects').innerHTML=`<div class="state err"><h3>Couldn't load Discover</h3><p>${esc(e.message)}</p></div>`; return; }
+  view._dsc={profile:meta.profile,enabled:meta.discovery_enabled,editing:!meta.profile,prospects:pros.prospects};
+  updateDscSub();
+  drawDscProfile(); drawDscRun(); drawProspects();
+}
+function updateDscSub(){
+  const n=(view._dsc.prospects||[]).filter(p=>p.status!=='dismissed').length;
+  const el=document.getElementById('dsc-sub'); if(el) el.textContent=`${n} prospect${n===1?'':'s'}`;
+}
+function drawDscProfile(){
+  const box=document.getElementById('dsc-profile'); if(!box) return; const d=view._dsc;
+  const list=a=>a&&a.length?a.join(', '):'—';
+  if(d.profile && !d.editing){
+    const p=d.profile;
+    box.innerHTML=`<article class="card"><div class="pros-hd"><div style="flex:1;min-width:0"><div class="cname">${esc(p.display_name||'Your profile')}</div>${p.headline?`<div class="cmail">${esc(p.headline)}</div>`:''}</div><button class="btn ghost sm" data-dsc="edit">Edit</button></div>
+      <div class="brk" style="margin-top:11px"><span>📍 ${esc(p.location||'—')}</span><span>🎓 ${esc(list(p.schools))}</span><span>🏢 ${esc(list(p.companies))}</span><span>✳ ${esc(list(p.skills))}</span></div></article>`;
+    return;
+  }
+  const p=d.profile||{};
+  box.innerHTML=`<article class="card"><div class="dform">
+    <div class="drow"><label class="dfield"><span>Import from LinkedIn URL (optional)</span><input id="dsc-url" placeholder="https://www.linkedin.com/in/you"/></label><button class="btn ghost sm" data-dsc="scrape" style="margin-bottom:1px">Import</button></div>
+    <div class="drow"><label class="dfield"><span>Name</span><input id="pf-name" value="${esc(p.display_name||'')}"/></label><label class="dfield"><span>Location</span><input id="pf-loc" value="${esc(p.location||'')}" placeholder="City, Country"/></label></div>
+    <label class="dfield"><span>Headline</span><input id="pf-head" value="${esc(p.headline||'')}" placeholder="What you do"/></label>
+    <label class="dfield"><span>Schools (comma-separated)</span><input id="pf-sch" value="${esc((p.schools||[]).join(', '))}"/></label>
+    <label class="dfield"><span>Companies (comma-separated)</span><input id="pf-co" value="${esc((p.companies||[]).join(', '))}"/></label>
+    <label class="dfield"><span>Interests / skills (comma-separated)</span><input id="pf-sk" value="${esc((p.skills||[]).join(', '))}"/></label>
+    <label class="dfield"><span>About</span><textarea id="pf-about" placeholder="A few sentences about your background and interests">${esc(p.about||'')}</textarea></label>
+    <div class="btnrow"><button class="btn" data-dsc="save">Save profile</button>${d.profile?`<button class="btn ghost" data-dsc="canceledit">Cancel</button>`:''}</div>
+  </div></article>`;
+}
+function drawDscRun(){
+  const box=document.getElementById('dsc-run'); if(!box) return; const d=view._dsc;
+  if(!d.profile){ box.innerHTML=''; return; }
+  if(!d.enabled){
+    box.innerHTML=`<div class="reconnect dsc-note"><span class="ic">⚙</span><div><b>Discovery not configured.</b> Add <code>BRAVE_API_KEY</code> and <code>HUNTER_API_KEY</code> to your <code>.env</code> to generate contacts. Your profile is saved and ready.</div></div>`;
+    return;
+  }
+  const has=(d.prospects||[]).some(p=>p.status!=='dismissed');
+  box.innerHTML = has
+    ? `<button class="btn" data-dsc="refresh" id="dsc-runbtn">Refresh — 15 new →</button> <span class="sub" style="margin-left:8px">discovers 15 fresh people · bookmarked ones stay</span>`
+    : `<button class="btn" data-dsc="run" id="dsc-runbtn">Run discovery →</button> <span class="sub" style="margin-left:8px">finds up to 15 people who match your background</span>`;
+}
+function prosButtons(p){
+  if(p.status==='saved') return `<span class="tag">saved ✓</span>`;
+  const bm = p.status==='bookmarked'
+    ? `<button class="btn ghost sm" data-pros-bookmark="${p.id}" data-on="0" title="Remove bookmark">★ Bookmarked</button>`
+    : `<button class="btn ghost sm" data-pros-bookmark="${p.id}" data-on="1" title="Bookmark — kept when you refresh">☆ Bookmark</button>`;
+  return `${bm}<button class="btn sm" data-pros-save="${p.id}">Save to network</button><button class="btn ghost sm" data-pros-dismiss="${p.id}">Dismiss</button>`;
+}
+function prosCard(p){
+  const b=p.score_breakdown||{}; const feat=b.features||{};
+  const contact = p.email?`<span class="pcontact">✉ ${esc(p.email)}</span>`:(p.phone?`<span class="pcontact">☎ ${esc(p.phone)}</span>`:`<span class="pcontact none">no contact found</span>`);
+  const bars=['geography','school','company','interest'].map(k=>`<span>${k} ${Math.round((feat[k]||0)*100)}%</span>`).join('');
+  const pct=Math.max(2,p.score);
+  return `<article class="card" id="pros-${p.id}">
+    <div class="pros-hd"><div style="flex:1;min-width:0"><div class="cname">${esc(p.name)}${p.company?` <span class="at">at ${esc(p.company)}</span>`:''}</div>
+      <div class="cmail">${esc([p.title,p.location,p.school].filter(Boolean).join(' · '))}</div></div>
+      <div class="scorebig" title="likelihood to respond">${p.score}</div></div>
+    <div class="prosc"><div class="score"><span class="lbl" style="margin:0">will reply?</span><div class="sbar"><div class="sfill" style="width:${pct}%"></div></div><span class="sval">${p.score}/100</span></div>
+      <div class="brk">${bars}</div></div>
+    ${p.relation_summary?`<p class="snip" data-pretext>${esc(p.relation_summary)}</p>`:''}
+    <div class="pros-hd" style="margin-top:10px;align-items:center">${contact}
+      <div class="btnrow" style="margin:0">${prosButtons(p)}</div></div>
+    ${p.source_url?`<div class="cmail" style="margin-top:8px"><a href="${esc(p.source_url)}" target="_blank" rel="noopener">source ↗</a></div>`:''}
+  </article>`;
+}
+function drawProspects(){
+  const box=document.getElementById('dsc-prospects'); if(!box) return;
+  const all=(view._dsc.prospects||[]).filter(p=>p.status!=='dismissed');
+  if(!all.length){ box.innerHTML=`<div class="state"><div class="ameta"><span class="p"></span> no prospects yet</div><h3>Nothing discovered yet</h3><p>${view._dsc.profile?'Run discovery to generate matched contacts.':'Save your profile, then run discovery.'}</p></div>`; return; }
+  const kept=all.filter(p=>p.status==='bookmarked'||p.status==='saved');
+  const fresh=all.filter(p=>p.status==='new');
+  let html='';
+  if(kept.length) html+=`<div class="cites-head"><p class="lbl">Bookmarked</p><span class="rule"></span><span class="count">${kept.length} kept</span></div>`+kept.map(prosCard).join('');
+  if(fresh.length) html+=`<div class="cites-head"${kept.length?' style="margin-top:16px"':''}><p class="lbl">Suggestions</p><span class="rule"></span><span class="count">${fresh.length} ranked</span></div>`+fresh.map(prosCard).join('');
+  box.innerHTML=html;
+  pretextize(box);
+}
+async function doDscScrape(){
+  const el=document.getElementById('dsc-url'); const url=(el?el.value:'').trim();
+  if(!url){ toast('Paste a LinkedIn URL first'); return; }
+  toast('Importing…');
+  let r; try{ r=await post('/discover/profile/scrape',{url}); }catch(e){ toast('Import failed: '+e.message,null,true); return; }
+  if(r.status==='scraped' && r.draft){
+    const d=r.draft; const set=(id,v)=>{const x=document.getElementById(id); if(x&&v) x.value=v;};
+    set('pf-name',d.display_name); set('pf-head',d.headline); set('pf-loc',d.location); set('pf-about',d.about);
+  }
+  toast(r.message);
+}
+async function doDscSave(){
+  const val=id=>{const x=document.getElementById(id); return x?x.value.trim():'';};
+  const splitc=s=>s.split(',').map(x=>x.trim()).filter(Boolean);
+  const body={display_name:val('pf-name'),headline:val('pf-head'),location:val('pf-loc'),schools:splitc(val('pf-sch')),companies:splitc(val('pf-co')),skills:splitc(val('pf-sk')),about:val('pf-about')};
+  if(!body.display_name && !body.headline){ toast('Add at least a name or headline'); return; }
+  let r; try{ r=await api('/discover/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+  catch(e){ toast('Save failed: '+e.message,null,true); return; }
+  view._dsc.profile=r.profile; view._dsc.editing=false; drawDscProfile(); drawDscRun();
+  toast('Profile saved');
+}
+async function doDscRun(){
+  const btn=document.getElementById('dsc-runbtn'); if(btn){ btn.disabled=true; btn.textContent='Discovering… (~30s)'; }
+  let r; try{ r=await post('/discover/run',{}); }
+  catch(e){ toast('Discovery failed: '+e.message,null,true); if(btn){btn.disabled=false;btn.textContent='Run discovery →';} return; }
+  const s=r.summary||{};
+  try{ const pr=await api('/discover/prospects'); view._dsc.prospects=pr.prospects; }catch(_){}
+  updateDscSub(); drawDscRun(); drawProspects();
+  toast(`Discovered ${s.created||0} · ${s.skipped_dupes||0} dupes${s.contactless?` · ${s.contactless} without contact`:''}`);
+}
+async function doProsSave(id){
+  try{ await post('/discover/prospects/'+id+'/save'); }catch(e){ toast('Save failed: '+e.message,null,true); return; }
+  const p=(view._dsc.prospects||[]).find(x=>x.id===id); if(p) p.status='saved';
+  drawProspects(); await loadMeta(); renderRail();
+  toast('Saved to your network');
+}
+async function doProsDismiss(id){
+  try{ await api('/discover/prospects/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'dismissed'})}); }
+  catch(e){ toast('Failed: '+e.message,null,true); return; }
+  const p=(view._dsc.prospects||[]).find(x=>x.id===id); if(p) p.status='dismissed';
+  updateDscSub(); drawDscRun(); drawProspects();
+  toast('Dismissed');
+}
+async function doProsBookmark(id,on){
+  const status=on?'bookmarked':'new';
+  try{ await api('/discover/prospects/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})}); }
+  catch(e){ toast('Failed: '+e.message,null,true); return; }
+  const p=(view._dsc.prospects||[]).find(x=>x.id===id); if(p) p.status=status;
+  drawProspects();
+  toast(on?'Bookmarked — kept when you refresh':'Bookmark removed');
+}
+async function doDscRefresh(){
+  const btn=document.getElementById('dsc-runbtn'); if(btn){ btn.disabled=true; btn.textContent='Discovering… (~30s)'; }
+  let r; try{ r=await post('/discover/run',{refresh:true}); }
+  catch(e){ toast('Refresh failed: '+e.message,null,true); drawDscRun(); return; }
+  const s=r.summary||{};
+  try{ const pr=await api('/discover/prospects'); view._dsc.prospects=pr.prospects; }catch(_){}
+  updateDscSub(); drawDscRun(); drawProspects();
+  toast(`Refreshed · ${s.created||0} new${s.skipped_dupes?` · ${s.skipped_dupes} dupes`:''}${s.contactless?` · ${s.contactless} without contact`:''}`);
 }
 
 function viewSources(){
@@ -492,7 +736,7 @@ function route(){
   let id=(location.hash.replace('#/','')||'ask'); if(!ROUTES.find(r=>r.id===id)) id='ask';
   document.getElementById('page-title').textContent = ROUTES.find(r=>r.id===id).title;
   renderNav(id); renderRail();
-  ({ask:viewAsk, people:viewPeople, review:viewReview, sources:viewSources}[id])();
+  ({ask:viewAsk, people:viewPeople, discover:viewDiscover, review:viewReview, sources:viewSources}[id])();
   document.getElementById('main').scrollTop=0; closeDrawer();
 }
 const go = id => { location.hash='#/'+id; };
@@ -506,8 +750,10 @@ document.getElementById('scrim').onclick=closeDrawer;
 
 /* ───────── EVENTS ───────── */
 document.addEventListener('click', e=>{
-  const t=e.target.closest('[data-go],[data-ask],[data-chip],[data-merge],[data-keep],[data-connect],[data-reconnect],[data-sync],[data-import]');
+  const t=e.target.closest('[data-go],[data-ask],[data-chip],[data-merge],[data-keep],[data-connect],[data-reconnect],[data-sync],[data-import],[data-dsc],[data-pros-save],[data-pros-dismiss],[data-pros-bookmark],[data-person],[data-people-back]');
   if(!t) return;
+  if(t.dataset.person!==undefined) return showPerson(t.dataset.person);
+  if(t.dataset.peopleBack!==undefined) return viewPeople();
   if(t.dataset.go!==undefined) return go(t.dataset.go);
   if(t.dataset.connect!==undefined || t.dataset.reconnect!==undefined){ window.location='/auth/google/start'; return; }
   if(t.dataset.ask!==undefined){ const inp=document.querySelector('.ask-input'); return doAsk(inp?inp.textContent:''); }
@@ -516,9 +762,22 @@ document.addEventListener('click', e=>{
   if(t.dataset.keep!==undefined) return doKeep(+t.dataset.keep);
   if(t.dataset.sync!==undefined) return doSync(t.dataset.sync);
   if(t.dataset.import!==undefined) return doImport(t.dataset.import);
+  if(t.dataset.dsc!==undefined){ const a=t.dataset.dsc;
+    if(a==='edit'){ view._dsc.editing=true; drawDscProfile(); }
+    else if(a==='canceledit'){ view._dsc.editing=false; drawDscProfile(); }
+    else if(a==='scrape') doDscScrape();
+    else if(a==='save') doDscSave();
+    else if(a==='run') doDscRun();
+    else if(a==='refresh') doDscRefresh();
+    return;
+  }
+  if(t.dataset.prosSave!==undefined) return doProsSave(t.dataset.prosSave);
+  if(t.dataset.prosDismiss!==undefined) return doProsDismiss(t.dataset.prosDismiss);
+  if(t.dataset.prosBookmark!==undefined) return doProsBookmark(t.dataset.prosBookmark, t.dataset.on==='1');
 });
 document.addEventListener('keydown', e=>{
   if(e.key==='Enter' && e.target.classList && e.target.classList.contains('ask-input')){ e.preventDefault(); doAsk(e.target.textContent); }
+  if((e.key==='Enter'||e.key===' ') && e.target.dataset && e.target.dataset.person!==undefined){ e.preventDefault(); showPerson(e.target.dataset.person); }
   if(e.key==='Escape') closeDrawer();
 });
 window.addEventListener('hashchange', route);
