@@ -117,6 +117,23 @@ def merge_candidates(db: Session = Depends(get_tenant_db)) -> dict:
     return {"candidates": out}
 
 
+def _linkedin_url(person: Person) -> str | None:
+    """Derive a real LinkedIn profile URL from provenance, if one was captured.
+
+    LinkedIn CSV imports store the profile URL as the source_record_id (when present),
+    and promoted Discover prospects (contactgen) carry it in raw_data['source_url'].
+    Returns None when no stored URL exists — the UI then offers a name-based search.
+    """
+    for s in person.sources:
+        if s.source_type == "linkedin" and (s.source_record_id or "").startswith("http"):
+            return s.source_record_id
+        if s.source_type == "contactgen":
+            url = (s.raw_data or {}).get("source_url")
+            if isinstance(url, str) and url.startswith("http"):
+                return url
+    return None
+
+
 @router.get("/{person_id}")
 def get_person(person_id: uuid.UUID, db: Session = Depends(get_tenant_db)) -> dict:
     """Person + provenance. Uses selectinload to fetch sources in one extra query (no N+1, T16)."""
@@ -145,6 +162,7 @@ def get_person(person_id: uuid.UUID, db: Session = Depends(get_tenant_db)) -> di
         "primary_email": person.primary_email,
         "company": person.company,
         "title": person.title,
+        "linkedin_url": _linkedin_url(person),
         "merged_into_id": str(person.merged_into_id) if person.merged_into_id else None,
         "sources": [
             {
